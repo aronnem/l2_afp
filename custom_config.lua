@@ -25,12 +25,12 @@ require "oco_base_config"
 
 config = OcoBaseConfig:new()
 
-config.fm.atmosphere.absorber.O2.absco = "v5.0_alpha/o2_v151005_cia_mlawer_v151005r1_narrow.hdf"
-config.fm.atmosphere.absorber.CO2.absco = "v5.0_alpha/co2_devi2015_wco2scale=nist_sco2scale=unity.hdf"
-config.fm.atmosphere.absorber.H2O.absco = "v5.0_temporary/h2o_hitran12.hdf"
+--config.fm.atmosphere.absorber.O2.absco = "v5.0_alpha/o2_v151005_cia_mlawer_v151005r1_narrow.hdf"
+--config.fm.atmosphere.absorber.CO2.absco = "v5.0_alpha/co2_devi2015_wco2scale=nist_sco2scale=unity.hdf"
+--config.fm.atmosphere.absorber.H2O.absco = "v5.0_temporary/h2o_hitran12.hdf"
 
-config.fm.atmosphere.absorber.O2.table_scale = 1.0
-config.fm.atmosphere.absorber.CO2.table_scale = { 1.0, 1.0, 1.006 }
+--config.fm.atmosphere.absorber.O2.table_scale = 1.0
+--config.fm.atmosphere.absorber.CO2.table_scale = { 1.0, 1.0, 1.004 }
 
 config:do_config()
 
