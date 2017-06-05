@@ -1,7 +1,7 @@
 import os.path
 
 import l2_full_physics_wrapper
-import retrieval
+import l2_afp_retrieval
 
 ddir = '/data/merrelli/OCO2_L2_workarea/sandbox_B8_pytest'
 L1bfile = os.path.join(ddir, 'oco2_L1bScTG_06280a_150906_B7000r_151030071317.h5')
@@ -23,4 +23,10 @@ Kupdate = l2_obj.Kupdate
 y = l2_obj.get_y()
 x0 = l2_obj.get_x()
 
-l2_solver_res = l2_obj._L2run.solver.solve(x0.copy(), x0.copy(), Sa.copy())
+_, y0, K0 = l2_obj.jacobian_run()
+
+Se = retrieval.diagcmatrix(Se_diag)
+
+hatx = l2_afp_retrieval.bayesian_nonlinear_l2fp(
+    Se, Sa, y, x0, y0, K0, Kupdate, start_gamma=10.0,
+    max_iteration_ct = 8, debug_write=True)
