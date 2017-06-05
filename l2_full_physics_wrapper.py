@@ -24,7 +24,8 @@ class wrapped_l2_fp(object):
 
     def __init__(self, L1bfile, ECMWFfile, 
                  config_file, 
-                 merradir, abscodir, 
+                 merradir, abscodir,
+                 imap_file = None, 
                  sounding_id = None, 
                  frame_number = None, 
                  footprint = None):
@@ -36,7 +37,8 @@ class wrapped_l2_fp(object):
 
         arg_list = (config_file, sounding_id, 
                     ECMWFfile, L1bfile, )
-        kw_dict = dict(merradir=merradir, abscodir=abscodir)
+        kw_dict = dict(merradir=merradir, abscodir=abscodir, 
+                       imap_file=imap_file)
 
         # store the input args and kw - mostly as a debug tool later.
         self._arg_list = arg_list
@@ -45,6 +47,11 @@ class wrapped_l2_fp(object):
         # create the full physics L2Eun object. This is the main 
         # interface to the l2_fp application.
         self._L2run = full_physics.L2Run(*arg_list, **kw_dict)
+
+        # so - the grid may depend on the prior data (I think).
+        # unknown at this point, whether a state vector change would require 
+        # the grid to be setup again. For now, assuming no.
+        self._L2run.forward_model.setup_grid()
 
         # Extract some parameters:
         #
@@ -91,7 +98,7 @@ class wrapped_l2_fp(object):
         grid_obj = self._L2run.forward_model.spectral_grid
         for b in range(3):
             self._sample_indexes.append( 
-                grid_obj.low_resolution_grid(b).sample_index.copy() )
+                grid_obj.low_resolution_grid(b).sample_index.copy()-1 )
 
 
     def get_noise(self, band=None):
@@ -140,6 +147,7 @@ class wrapped_l2_fp(object):
         """
         x = self._L2run.state_vector.state.copy()
         S = self._L2run.state_vector.state_covariance.copy()
+        
         if x_new.shape != x.shape:
             raise ValueError('shape mismatch, x_new.shape = ' + 
                              str(x_new.shape) + ' , x.shape = ' + 
