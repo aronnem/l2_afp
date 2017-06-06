@@ -6,11 +6,34 @@ import h5py
 
 import numpy as np
 
-def _get_sounding_id_from_framefp(L1bfile, frame_number, footprint):
+def get_sounding_id_from_framefp(L1bfile, frame_number, footprint):
+    """
+    convenience function to get sounding_id from frame_number and footprint.
+    note that frame_number and footprint are assumed to be 1-ordered.
+
+    assumes scalar inputs.
+    """
     varpath = '/SoundingGeometry/sounding_id'
     with h5py.File(L1bfile) as hfile:
         sounding_id = hfile.get(varpath)[frame_number-1, footprint-1]
     sounding_id = str(sounding_id)
+
+    return sounding_id
+
+def get_framefp_from_sounding_id(L1bfile, sounding_id):
+    varpath = '/SoundingGeometry/sounding_id'
+    with h5py.File(L1bfile) as hfile:
+        sounding_id_array = hfile.get(varpath)[:]
+    frame_number_a, footprint_a = (sounding_id == sounding_id_array).nonzero()
+    if frame_number_a.shape[0] == 0:
+        raise ValueError('sounding_id not found in file')
+    if frame_number_a.shape[0] > 1:
+        raise ValueError('More than one matching sounding_id? aborting...')
+
+    frame_number = frame_number_a[0] + 1
+    footprint = footprint_a[0] + 1
+
+    return frame_number, footprint
 
 
 class wrapped_l2_fp(object):
@@ -34,6 +57,10 @@ class wrapped_l2_fp(object):
                 (sounding_id is None):
             raise ValueError("Either sounding_id, or footprint "+
                              "and frame_number must be specified")
+
+        if sounding_id is None:
+            sounding_id = get_sounding_id_from_framefp(
+                L1bfile, frame_number, footprint)
 
         arg_list = (config_file, sounding_id, 
                     ECMWFfile, L1bfile, )
@@ -73,9 +100,6 @@ class wrapped_l2_fp(object):
         for b in range(3):
             start = self._channel_ranges[b,0]
             stop = self._channel_ranges[b,1]
-            # hack, for unknown reason, the last O2AB sample is not included
-            #if b == 0:
-            #    stop -= 1
             self._band_slices.append(slice(start, stop))
 
         # 3) bad sample masks.
@@ -91,8 +115,9 @@ class wrapped_l2_fp(object):
             self._sample_masks[:,b] = bad_sample_mask == 0
 
         # 4) attempt to get the sample indexes from other internal object.
-        # turns out that 3) doesn't really work - the actual sample lists 
-        # have another criteria outside of the bad sample masks.
+        # turns out that step 3) doesn't really work - the actual sample lists 
+        # have another criteria outside of the bad sample masks, it seems. 
+        # often step 3) would be one sample off.
         self._sample_indexes = []
         # copy grid_obj to shorten syntax.
         grid_obj = self._L2run.forward_model.spectral_grid
@@ -101,14 +126,38 @@ class wrapped_l2_fp(object):
                 grid_obj.low_resolution_grid(b).sample_index.copy()-1 )
 
 
-    def get_noise(self, band=None):
+    def get_sample_indexes(self, band='all'):
+        """
+        gets the sample indexes, per band, for this observation.
+        band must be equal to : 1,2,3, or 'all', to get all 
+        bands concatenated together.
+
+        this is equivalent to the 'sample_indexes' array in the L2Dia 
+        SpectralParameters group, or in single sounding input.
+        These are 1-ordered indexes (This needs verification! - have not 
+        checked that the official L2 output is 1-ordered.)
+        
+        Returns the sample indexes in a 1D int array with shape (w,)
+        """
+        if band == 'all':
+            sample_indexes = [self._sample_indexes]
+            sample_index = np.concatenate(sample_index)
+        else:
+            b = band-1
+            sample_index = np._sample_indexes[b].copy()
+        return sample_index
+
+
+    def get_noise(self, band='all'):
         """
         gets the sensor noise, per band, for this observation.
-        band must be equal to : 1,2,3, or None, to get all 
+        band must be equal to : 1,2,3, or 'all', to get all 
         bands concatenated together.
-        Returns the noise at only the used samples.
+
+        Returns the noise at the used spectral samples, in a 1D array 
+        with shape (w,)
         """
-        if band is None:
+        if band == 'all':
             noise_per_band = [self.get_noise(b) for b in range(1,4)]
             noise = np.concatenate(noise_per_band)
         else:
@@ -121,9 +170,17 @@ class wrapped_l2_fp(object):
         return noise
 
 
-    def get_y(self, band=None):
+    def get_y(self, band='all'):
+        """
+        gets the observation, per band (e.g. the measured radiance)
+        band must be equal to : 1,2,3, or 'all', to get all 
+        bands concatenated together.
 
-        if band is None:
+        Returns the radiance at the used spectral samples, in a 1D  
+        array with shape (w,).
+        """
+
+        if band == 'all':
             y_per_band = [self.get_y(b) for b in range(1,4)]
             y = np.concatenate(y_per_band)
         else:
@@ -133,7 +190,13 @@ class wrapped_l2_fp(object):
         return y
 
 
-    def get_Se_diag(self, band=None):
+    def get_Se_diag(self, band='all'):
+        """
+        convenience function to get the get S_e (measurement noise) diagonal - 
+        this is just the noise level squared.
+
+        returns a 1D array with shape (w,), for w used samples.
+        """
 
         noise = self.get_noise(band=band)
         Se_diag = noise ** 2
@@ -144,6 +207,11 @@ class wrapped_l2_fp(object):
     def set_x(self, x_new):
         """
         update the state vector with new values.
+
+        the caller must know the correct layout for the state vector. This must be 
+        a 1D numpy ndarray with the correct shape and content.
+
+        see get_state_variable_names, in order to get the variable list.
         """
         x = self._L2run.state_vector.state.copy()
         S = self._L2run.state_vector.state_covariance.copy()
@@ -156,9 +224,24 @@ class wrapped_l2_fp(object):
         self._L2run.state_vector.update_state(x_new, S)
 
 
+    def get_state_variable_names(self):
+        """
+        return the state variable names, in order, as a python tuple 
+        of strings.
+        """
+        svnames = self._L2run.state_vector.state_vector_name
+        return svnames
+
+
     def set_Sa(self, S_new):
         """
         update the state covariance with new values.
+
+        the caller must know the correct layout for the state vector (and thus 
+        the covariance matrix.) This must be a 2D numpy ndarray with the 
+        correct shape and content.
+
+        see get_state_variable_names, in order to get the variable list.
         """
         x = self._L2run.state_vector.state.copy()
         S = self._L2run.state_vector.state_covariance.copy()
@@ -173,18 +256,34 @@ class wrapped_l2_fp(object):
     def get_x(self):
         """
         get the current state vector
+
+        return is a 1D array with shape (v,) for v state variables.
         """
         return self._L2run.state_vector.state.copy()
 
 
     def get_Sa(self):
         """
-        get the current state covariance
+        get the current state covariance.
+
+        return is a 2D array with shape (v, v) for v state variables.
         """
         return self._L2run.state_vector.state_covariance.copy()
 
 
-    def forward_run(self, band=None):
+    def forward_run(self, band='all'):
+        """
+        do a forward run, for one band (1,2,3), or all bands (band='all'), 
+        using the current configuration and state vector.
+        
+        returns:
+        wl - wavelength at the used spectral samples, in micrometers.
+           1D array with shape (w,), for w used samples.
+        I - modeled radiance at the used spectral channels, in L1b units
+           1D array with shape (w,), for w used samples.
+        """
+        if self._L2run is None:
+            raise ValueError('L2 object is closed - no further runs possible')
         if band is None:
             fm_result = self._L2run.forward_model.radiance_all(True)
         else:
@@ -196,6 +295,20 @@ class wrapped_l2_fp(object):
 
 
     def jacobian_run(self, band=None):
+        """
+        do a jacobian run, for one band (1,2,3), or all bands (band='all')
+
+        returns:
+        wl - wavelength at the used spectral samples, in micrometers.
+           1D array with shape (w,), for w used samples.
+        I - modeled radiance at the used spectral channels, in L1b units.
+           1D array with shape (w,), for w used samples.
+        K - modeled jacobian at the used spectral channels, in L1b radiance 
+           1D array with units (same as I) per state vector unit.
+           shape (w, v) for w used samples, and v state variables
+        """ 
+        if self._L2run is None:
+            raise ValueError('L2 object is closed - no further runs possible')
         if band is None:
             fm_result = self._L2run.forward_model.radiance_all(False)
         else:
@@ -225,4 +338,8 @@ class wrapped_l2_fp(object):
 
 
     def close_obj(self):
+        """
+        This attempts to "close" the object - I am not sure this really works - 
+        but this is how the l2_special_run.py tries to do it.
+        """
         self._L2run = None
