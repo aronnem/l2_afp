@@ -23,10 +23,12 @@ Kupdate = l2_obj.Kupdate
 y = l2_obj.get_y()
 x0 = l2_obj.get_x()
 
-_, y0, K0 = l2_obj.jacobian_run()
+Se = l2_afp_retrieval.diagcmatrix(Se_diag)
 
-Se = retrieval.diagcmatrix(Se_diag)
-
-hatx = l2_afp_retrieval.bayesian_nonlinear_l2fp(
-    Se, Sa, y, x0, y0, K0, Kupdate, start_gamma=10.0,
-    max_iteration_ct = 8, debug_write=True)
+#hatx = l2_afp_retrieval.bayesian_nonlinear_l2fp(
+#    Se, Sa, y, x0, Kupdate, start_gamma=10.0,
+#    max_iteration_ct = 8, debug_write=True, 
+#    debug_write_prefix='test_l2_afp_run', 
+#    match_l2_fp_costfunc=False)
+#    debug_write_prefix='test_l2_afp_match_run', 
+#    match_l2_fp_costfunc=True)
