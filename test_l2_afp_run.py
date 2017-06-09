@@ -1,5 +1,8 @@
 import os.path
 
+import h5py
+import numpy as np
+
 import l2_full_physics_wrapper
 import l2_afp_retrieval
 
@@ -25,10 +28,31 @@ x0 = l2_obj.get_x()
 
 Se = l2_afp_retrieval.diagcmatrix(Se_diag)
 
-#hatx = l2_afp_retrieval.bayesian_nonlinear_l2fp(
-#    Se, Sa, y, x0, Kupdate, start_gamma=10.0,
-#    max_iteration_ct = 8, debug_write=True, 
-#    debug_write_prefix='test_l2_afp_run', 
-#    match_l2_fp_costfunc=False)
-#    debug_write_prefix='test_l2_afp_match_run', 
-#    match_l2_fp_costfunc=True)
+x_i_list, S_i_list = l2_afp_retrieval.bayesian_nonlinear_l2fp(
+    Se, Sa, y, x0, Kupdate, start_gamma=10.0,
+    max_iteration_ct = 2, debug_write=False, 
+    debug_write_prefix='test_l2_afp_match_run', 
+    match_l2_fp_costfunc=True)
+
+
+# change these into ndarray that match the normal l2 single sounding output, 
+# with iteration output turned on.
+# shapes are [1, N_iter, N_var] for state var, uncertainty;
+# and [1, N_iter, N_var, N_var] for posterior covar.
+x_i = np.array(x_i_list)[np.newaxis, ...]
+S_i = np.array(S_i_list)[np.newaxis, ...]
+x_unc_i = np.zeros_like(x_i)
+for n in range(S_i.shape[0]):
+    x_unc_i[0,n,:] = np.sqrt(np.diag(S_i_list[n]))
+
+h = h5py.File('l2afp_'+sounding_id+'.h5', 'w')
+# note that h5py will nicely create the needed groups for you, 
+# so we can do this easily in one loop.
+vnames = [
+    '/Iteration/RetrievedStateVector/state_vector_result', 
+    '/Iteration/RetrievalResults/aposteriori_covariance_matrix',
+    '/Iteration/RetrievedStateVector/state_vector_aposteriori_uncert' ]
+vdata = [x_i, S_i, x_unc_i]
+for vname, v in zip(vnames, vdata):
+    h.create_dataset(vname, data = v)
+h.close()

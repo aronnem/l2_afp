@@ -172,7 +172,9 @@ def _do_inversion(residual, K, Se, N, inv_Sa_scaled, Sa_sigma, gamma):
     d_sigma_sq = np.dot(rhs, dx_scaled)
     d_sigma_sq_scaled = d_sigma_sq / K.shape[1]
 
-    return dx, d_sigma_sq_scaled
+    S_i = np.linalg.inv(lhs)
+
+    return dx, d_sigma_sq_scaled, S_i
 
 
 def bayesian_nonlinear_l2fp(
@@ -224,6 +226,13 @@ def bayesian_nonlinear_l2fp(
     x_i = x0
     x_prev = x0
 
+    # make a list of the x_i at each step; make a copy just to make 
+    # sure nothing gets modified later.
+    x_i_list = []
+    x_i_list.append(x_i.copy())
+    S_i_list = []
+    S_i_list.append(Sa.copy())
+
     # main convergence loop. Note the 3 possible exit criteria
     #
     # The important thing to realize here, is that the Kupdate is the 
@@ -265,7 +274,7 @@ def bayesian_nonlinear_l2fp(
             # it cannot produce a convergence.)
 
             num_diverged += 1
-            dx_i, d_sigma_sq_scaled = _do_inversion(
+            dx_i, d_sigma_sq_scaled, S_i = _do_inversion(
                 residual_prev, K_prev, Se, N, inv_Sa_scaled, Sa_sigma, gamma)
 
             # cost function forecast - uses Fhatx + linear extrapolation using 
@@ -294,7 +303,7 @@ def bayesian_nonlinear_l2fp(
             K_prev = K_i
             Fx_prev = Fx_i
 
-            dx_ip1, d_sigma_sq_scaled = _do_inversion(
+            dx_ip1, d_sigma_sq_scaled, S_i = _do_inversion(
                 residual_i, K_i, Se, N, inv_Sa_scaled, Sa_sigma, gamma)
             
             # cost function forecast - uses Fhatx + linear extrapolation using 
@@ -311,11 +320,17 @@ def bayesian_nonlinear_l2fp(
             if d_sigma_sq_scaled < convergence_thresh:
                 convergence_met = True
 
-        print('  -> D_sigma_sq_scaled: ' + str(d_sigma_sq_scaled))
+        x_i_list.append(x_i.copy())
+        S_i_list.append(S_i.copy())
+
+        if debug_write:
+            print('  -> D_sigma_sq_scaled: ' + str(d_sigma_sq_scaled))
         cost_function_values.append(new_cf)
         cost_function_value_forecasts.append(last_cf_forecast)
         gamma_values.append(gamma_p1)
         divergence_status.append(diverged)
+
+        
 
         if debug_write:
             # painfully writing out every matrix, for testing purposes.
@@ -330,8 +345,8 @@ def bayesian_nonlinear_l2fp(
             file_ct += 1
 
             
-        print (
-            'Iter Stat: {0:d}, {1:d} max iter'.format(iter_ct,max_iteration_ct)+
-            ', divergences: {0:d}, {1:d} max'.format(num_diverged, max_num_diverged))
+            print (
+                'Iter Stat: {0:d}, {1:d} max iter'.format(iter_ct,max_iteration_ct)+
+                ', divergences: {0:d}, {1:d} max'.format(num_diverged, max_num_diverged))
 
-    return x_i
+    return x_i_list, S_i_list
