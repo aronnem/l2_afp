@@ -141,7 +141,7 @@ class wrapped_l2_fp(object):
         """
         if band == 'all':
             sample_indexes = [self._sample_indexes]
-            sample_index = np.concatenate(sample_index)
+            sample_index = np.concatenate(sample_indexes)
         else:
             b = band-1
             sample_index = np._sample_indexes[b].copy()
