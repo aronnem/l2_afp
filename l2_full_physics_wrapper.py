@@ -92,7 +92,7 @@ class wrapped_l2_fp(object):
         # 1) channel ranges (start/stop channel numbers) for each band;
         #   (channels outside this range are not used.
         self._channel_ranges = \
-            self._L2run.spectral_window.range_array.value[:,0,:].copy()
+            self._L2run.spectral_window.range_array.value[:,0,:].astype(int)
 
         # 2) convert the channel ranges to python slice objects (for ease 
         # of use layer on.)
@@ -284,7 +284,7 @@ class wrapped_l2_fp(object):
         """
         if self._L2run is None:
             raise ValueError('L2 object is closed - no further runs possible')
-        if band is None:
+        if band == 'all':
             fm_result = self._L2run.forward_model.radiance_all(True)
         else:
             b = band-1
@@ -294,7 +294,7 @@ class wrapped_l2_fp(object):
         return wl, I
 
 
-    def jacobian_run(self, band=None):
+    def jacobian_run(self, band='all'):
         """
         do a jacobian run, for one band (1,2,3), or all bands (band='all')
 
@@ -309,7 +309,7 @@ class wrapped_l2_fp(object):
         """ 
         if self._L2run is None:
             raise ValueError('L2 object is closed - no further runs possible')
-        if band is None:
+        if band == 'all':
             fm_result = self._L2run.forward_model.radiance_all(False)
         else:
             b = band-1
