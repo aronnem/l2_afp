@@ -3,3 +3,4 @@ syntax: glob
 *.pyc
 *.h5
 *.npz
+log
