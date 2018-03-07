@@ -230,6 +230,7 @@ def bayesian_nonlinear_l2fp(
     # sure nothing gets modified later.
     x_i_list = []
     x_i_list.append(x_i.copy())
+    Fx_i_list = []
     S_i_list = []
     S_i_list.append(Sa.copy())
 
@@ -252,6 +253,7 @@ def bayesian_nonlinear_l2fp(
         # evaluate forward model, and update the residual.
         Fx_i, K_i = Kupdate(x_i, model_params)
         residual_i = y - Fx_i
+        Fx_i_list.append(Fx_i.copy())
 
         # this allows the true cost function to be computed at the 
         # at newly evaluated F(x_i)
@@ -330,7 +332,6 @@ def bayesian_nonlinear_l2fp(
         gamma_values.append(gamma_p1)
         divergence_status.append(diverged)
 
-        
 
         if debug_write:
             # painfully writing out every matrix, for testing purposes.
@@ -349,4 +350,4 @@ def bayesian_nonlinear_l2fp(
                 'Iter Stat: {0:d}, {1:d} max iter'.format(iter_ct,max_iteration_ct)+
                 ', divergences: {0:d}, {1:d} max'.format(num_diverged, max_num_diverged))
 
-    return x_i_list, S_i_list
+    return x_i_list, Fx_i_list, S_i_list
