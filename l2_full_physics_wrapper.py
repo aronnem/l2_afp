@@ -4,6 +4,8 @@ import full_physics_swig
 import full_physics
 import h5py
 
+import output_translation
+
 import numpy as np
 
 def get_sounding_id_from_framefp(L1bfile, frame_number, footprint):
@@ -70,6 +72,7 @@ class wrapped_l2_fp(object):
         # store the input args and kw - mostly as a debug tool later.
         self._arg_list = arg_list
         self._kw_dict = kw_dict
+        self._sounding_id = sounding_id
 
         # create the full physics L2Eun object. This is the main 
         # interface to the l2_fp application.
@@ -125,6 +128,14 @@ class wrapped_l2_fp(object):
             self._sample_indexes.append( 
                 grid_obj.low_resolution_grid(b).sample_index.copy()-1 )
 
+        # TBD - there are other 'derived' values that could be usefully 
+        # extracted from the L1b file during setup:
+        # retrieval times (string and tai93), operation_mode, 
+        # surface_type (?), some contents of L1bSc spectral parameters.
+        # mostly these would need to be added if we want the output 
+        # in the mocked-up l2 files that are created  - 
+        # see write_h5_output_file().
+
 
     def get_sample_indexes(self, band='all'):
         """
@@ -140,11 +151,11 @@ class wrapped_l2_fp(object):
         Returns the sample indexes in a 1D int array with shape (w,)
         """
         if band == 'all':
-            sample_indexes = [self._sample_indexes]
+            sample_indexes = [self.get_sample_indexes(b) for b in range(1,4)]
             sample_index = np.concatenate(sample_indexes)
         else:
             b = band-1
-            sample_index = np._sample_indexes[b].copy()
+            sample_index = self._sample_indexes[b].copy()
         return sample_index
 
 
@@ -335,6 +346,108 @@ class wrapped_l2_fp(object):
         self.set_x(hatx)
         wl, I, K = self.jacobian_run()
         return I, K
+
+    def solve(self, x_i=None, x_a=None, cov_a=None):
+        """
+        Exposes the operational solver. this will run the l2_fp in the 
+        same way that it runs operationally, but allows the prior, FG, or 
+        covariance to be changed.
+        Note if any of the three are used, the stored values are used 
+        (FG is the prior)
+        """
+
+        if x_i is None:
+            x_i = self._state_first_guess
+        if x_a is None:
+            x_a = self._state_first_guess
+        if cov_a is None:
+            cov_a = self._apriori_covariance
+
+        self._L2run.solver.solve(x_i, x_a, cov_a)
+
+        hatx = self._L2run.solver.x_solution.copy()
+        
+
+        return 
+
+
+    def write_h5_output_file(self, filename, 
+                             final_state=None, final_uncert=None,
+                             modeled_rad=None):
+        """
+        writes a h5 file, similar to the format for the RetrievedStateVector 
+        and SpectralParameters groups of the offline l2-aggregate
+
+        note that the final state and modeled_rad are optionally set via 
+        keyword, for cases where instead of the solve() method, the 
+        caller uses the afp to find the state estimate.
+        """
+
+        if final_state is None:
+            if self._L2run.solver.x_solution.shape[0] > 0:
+                final_state = self._L2run.solver.x_solution.copy()
+            else:
+                final_state = np.zeros_like(self._state_first_guess)
+                final_state[:] = np.nan
+
+        if final_uncert is None:
+            if self._L2run.solver.x_solution.shape[0] > 0:
+                final_uncert = self._L2run.solver.x_solution.copy()
+            else:
+                final_uncert = np.zeros_like(self._state_first_guess)
+                final_uncert[:] = np.nan
+
+        # Note this might have a mismatch with the state vector, since there 
+        # are some dispersion related elements. that might shift the wavelength 
+        # grid slightly?
+        wavelength = []
+        for b in range(3):
+            tmp = self._L2run.forward_model.spectral_grid.low_resolution_grid(b)
+            wavelength.append(tmp.wavelength())
+        wavelength = np.concatenate(wavelength)
+
+        if modeled_rad is None:
+            modeled_rad = np.zeros_like(wavelength)
+            modeled_rad[:] = np.nan
+
+        dat = {}
+
+        # FG is equal to a priori state
+        dat['/RetrievedStateVector/state_vector_apriori'] = \
+            self._state_first_guess
+        dat['/RetrievedStateVector/state_vector_apriori_uncert'] = \
+            np.sqrt(np.diag(self._apriori_covariance))
+        dat['/RetrievedStateVector/state_vector_result'] = final_state
+        dat['/RetrievedStateVector/state_vector_names'] = \
+            np.array(self.get_state_variable_names())
+
+        sounding_id = np.zeros(1, dtype=np.int64)
+        sounding_id[0] = int(self._sounding_id)
+        dat['/RetrievalHeader/sounding_id_reference'] = sounding_id
+        dat['/RetrievalHeader/sounding_id'] = sounding_id
+
+        dat['/SpectralParameters/wavelength'] = wavelength
+        dat['/SpectralParameters/measured_radiance'] = self.get_y()
+        dat['/SpectralParameters/measured_radiance_uncert'] = self.get_noise()
+        dat['/SpectralParameters/modeled_radiance'] = modeled_rad
+        dat['/SpectralParameters/sample_indexes'] = self.get_sample_indexes()
+
+        dat['/RetrievalResults/xco2'] = [self._L2run.xco2]
+
+        s = np.newaxis, Ellipsis
+
+        split_dat = output_translation.state_vector_splitting(
+            self._state_first_guess, final_state, final_uncert, 
+            self.get_state_variable_names())
+
+        dat.update(split_dat)
+
+        with h5py.File(filename, 'w') as h:
+            for vname in dat:
+                if len(dat[vname]) > 1:
+                    h.create_dataset(vname, data=dat[vname][s])
+                else:
+                    h.create_dataset(vname, data=dat[vname])
 
 
     def close_obj(self):
