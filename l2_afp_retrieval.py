@@ -119,7 +119,9 @@ def _check_convergence(fs_gamma2, fs_last_gamma2,
 
 def _debug_write_file(fname, 
                       N, Sa, Sa_scaled, x0, y, 
-                      Fx_i, K_i, x_i, x_prev, residual_i, residual_prev, 
+                      Fx_i, K_i, x_i, x_prev, 
+                      lhs, rhs, KtSeK,
+                      residual_i, residual_prev, 
                       cost_function_values, cost_function_value_forecasts, 
                       gamma_values, divergence_status, 
                       iter_ct, num_diverged):
@@ -136,6 +138,9 @@ def _debug_write_file(fname,
     h.create_dataset('K_i', data=K_i)
     h.create_dataset('x_i', data=x_i)
     h.create_dataset('x_prev', data=x_prev)
+    h.create_dataset('lhs', data=lhs)
+    h.create_dataset('rhs', data=rhs)
+    h.create_dataset('KtSeK', data=KtSeK)
     h.create_dataset('residual_i', data=residual_i)
     h.create_dataset('residual_prev', data=residual_prev)
     h.create_dataset('cost_func', data=cost_function_values)
@@ -147,7 +152,7 @@ def _debug_write_file(fname,
     h.close()
 
 
-def _do_inversion(residual, K, Se, N, inv_Sa_scaled, Sa_sigma, gamma):
+def _do_inversion(residual, K, Se, N, inv_Sa_scaled, Sa_sigma, gamma, x_0, x_i):
     """
     mimics the do_inversion in connor_solver.
     Useful to have this as a helper function, since we basically need to 
@@ -164,8 +169,9 @@ def _do_inversion(residual, K, Se, N, inv_Sa_scaled, Sa_sigma, gamma):
     KtSeK = np.dot(K.T, Se.getI() * K)
     
     lhs = (1+gamma) * inv_Sa_scaled + np.dot(N, np.dot(KtSeK,N))
-    rhs = np.dot(N, np.dot(K.T, Se.getI() * residual))
-    
+    rhs = ( np.dot(N, np.dot(K.T, Se.getI() * residual)) + 
+            np.dot(inv_Sa_scaled, (x_0 - x_i)/Sa_sigma) )
+
     dx_scaled = np.linalg.solve(lhs, rhs)
     dx = dx_scaled * Sa_sigma
 
@@ -174,7 +180,7 @@ def _do_inversion(residual, K, Se, N, inv_Sa_scaled, Sa_sigma, gamma):
 
     S_i = np.linalg.inv(lhs)
 
-    return dx, d_sigma_sq_scaled, S_i
+    return dx, d_sigma_sq_scaled, S_i, lhs, rhs, KtSeK
 
 
 def bayesian_nonlinear_l2fp(
@@ -182,7 +188,7 @@ def bayesian_nonlinear_l2fp(
     start_gamma = 10.0, 
     model_params = None, 
     max_iteration_ct = 10, 
-    convergence_thresh = 0.2, 
+    convergence_thresh = 2.0, 
     max_num_diverged = 2,     
     debug_write=False, 
     debug_write_prefix='l2ret_debug', 
@@ -259,6 +265,12 @@ def bayesian_nonlinear_l2fp(
         # at newly evaluated F(x_i)
         new_cf = cost_function(y, Fx_i, Se.getI(), x0, x_i, inv_Sa)
 
+        dx_i, d_sigma_sq_scaled, S_i, lhs, rhs, KtSeK = _do_inversion(
+            residual_i, K_i, Se, N, inv_Sa_scaled, Sa_sigma, gamma, x0, x_i)
+
+        if debug_write:
+            print('   -> dPs = dx_i[21] ' + str(dx_i[21]/100))
+
         # we can now evaluate the divergence, with this new cost function value.
         gamma_p1, diverged = _check_convergence(
             new_cf, last_cf, last_cf_forecast, gamma, iter_ct, 
@@ -276,8 +288,8 @@ def bayesian_nonlinear_l2fp(
             # it cannot produce a convergence.)
 
             num_diverged += 1
-            dx_i, d_sigma_sq_scaled, S_i = _do_inversion(
-                residual_prev, K_prev, Se, N, inv_Sa_scaled, Sa_sigma, gamma)
+            dx_i, d_sigma_sq_scaled, S_i, lhs, rhs, KtSeK = _do_inversion(
+                residual_prev, K_prev, Se, N, inv_Sa_scaled, Sa_sigma, gamma, x0, x_i)
 
             # cost function forecast - uses Fhatx + linear extrapolation using 
             # K at this step.
@@ -305,15 +317,15 @@ def bayesian_nonlinear_l2fp(
             K_prev = K_i
             Fx_prev = Fx_i
 
-            dx_ip1, d_sigma_sq_scaled, S_i = _do_inversion(
-                residual_i, K_i, Se, N, inv_Sa_scaled, Sa_sigma, gamma)
+            #dx_ip1, d_sigma_sq_scaled, S_i, lhs, rhs = _do_inversion(
+            #    residual_i, K_i, Se, N, inv_Sa_scaled, Sa_sigma, gamma)
             
             # cost function forecast - uses Fhatx + linear extrapolation using 
             # K at this step.
             # note the forecast isn't used during this iteration, but will be used on 
             # the next iteration, to assess the linearity of the state update
-            x_ip1 = x_i + dx_ip1
-            Fx_ip1_fc = Fx_i + np.dot(K_i, dx_ip1)
+            x_ip1 = x_i + dx_i
+            Fx_ip1_fc = Fx_i + np.dot(K_i, dx_i)
 
             last_cf_forecast = cost_function(y, Fx_ip1_fc, Se.getI(), x0, x_ip1, inv_Sa)
             last_cf = new_cf
@@ -339,7 +351,9 @@ def bayesian_nonlinear_l2fp(
             fname = debug_write_prefix+'_file{0:03d}.h5'.format(file_ct)
             _debug_write_file(fname, 
                               N, Sa, Sa_scaled, x0, y, 
-                              Fx_i, K_i, x_i, x_prev, residual_i, residual_prev, 
+                              Fx_i, K_i, x_i, x_prev, 
+                              lhs, rhs, KtSeK,
+                              residual_i, residual_prev, 
                               cost_function_values, cost_function_value_forecasts, 
                               gamma_values, divergence_status, 
                               iter_ct, num_diverged)
