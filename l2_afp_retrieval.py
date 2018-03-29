@@ -123,7 +123,8 @@ def _debug_write_file(fname,
                       lhs, rhs, KtSeK,
                       residual_i, residual_prev, 
                       cost_function_values, cost_function_value_forecasts, 
-                      gamma_values, divergence_status, 
+                      gamma_values, divergence_status,
+                      d_sigma_sq_values,
                       iter_ct, num_diverged):
     """
     helper to just dump out the contents of the various arrays
@@ -147,6 +148,7 @@ def _debug_write_file(fname,
     h.create_dataset('cost_func_fc', data=cost_function_value_forecasts)
     h.create_dataset('gamma', data=gamma_values)
     h.create_dataset('divergence', data=divergence_status)
+    h.create_dataset('d_sigma_sq_values', data=d_sigma_sq_values)
     h.create_dataset('iter_ct', data=iter_ct)
     h.create_dataset('num_diverged', data=num_diverged)
     h.close()
@@ -210,6 +212,8 @@ def bayesian_nonlinear_l2fp(
     cost_function_values = []
     cost_function_value_forecasts = []
     gamma_values = []
+    d_sigma_sq_values = []
+
     divergence_status = []
 
     # precompute matrix inversions, etc.
@@ -225,6 +229,7 @@ def bayesian_nonlinear_l2fp(
     cost_function_values.append(0.0)
     cost_function_value_forecasts.append(0.0)
     gamma_values.append(gamma)
+    d_sigma_sq_values.append(0.0)
 
     last_cf = cost_function_values[0]
     last_cf_forecast = cost_function_value_forecasts[0]
@@ -343,6 +348,7 @@ def bayesian_nonlinear_l2fp(
         cost_function_value_forecasts.append(last_cf_forecast)
         gamma_values.append(gamma_p1)
         divergence_status.append(diverged)
+        d_sigma_sq_values.append(d_sigma_sq_scaled)
 
 
         if debug_write:
@@ -356,6 +362,7 @@ def bayesian_nonlinear_l2fp(
                               residual_i, residual_prev, 
                               cost_function_values, cost_function_value_forecasts, 
                               gamma_values, divergence_status, 
+                              d_sigma_sq_values,
                               iter_ct, num_diverged)
             file_ct += 1
 
