@@ -3,20 +3,19 @@ import os.path
 import h5py
 import numpy as np
 
-import l2_full_physics_wrapper
-import l2_afp_retrieval
+import l2_afp
 
 ddir = '/data/merrelli/OCO2_L2_workarea/sandbox_B8_pytest'
 L1bfile = os.path.join(ddir, 'oco2_L1bScTG_06280a_150906_B7000r_151030071317.h5')
 ECfile = os.path.join(ddir, 'oco2_ECMWFTG_06280a_150906_B7000_150906183644.h5')
 IDPfile = os.path.join(ddir, 'oco2_L2IDPTG_06280a_150906_B7000r_151030124259.h5')
 sounding_id = '2015090613050738'
-#config_file = 'custom_config_default.lua'
-config_file = 'custom_config.lua'
+
+config_file = l2_afp.utils.get_lua_config_files()['default']
 merradir = '/data/OCO2/L2_datasets/merra_composite'
 abscodir = '/data/OCO2/absco'
 
-l2_obj = l2_full_physics_wrapper.wrapped_l2_fp(
+l2_obj = l2_afp.wrapped_fp(
     L1bfile, ECfile, config_file, merradir, abscodir, 
     sounding_id = sounding_id, imap_file = IDPfile)
 
@@ -26,11 +25,11 @@ Kupdate = l2_obj.Kupdate
 y = l2_obj.get_y()
 x0 = l2_obj.get_x()
 
-Se = l2_afp_retrieval.diagcmatrix(Se_diag)
+Se = l2_afp.utils.diagcmatrix(Se_diag)
 
-x_i_list, Fx_i_list, S_i_list = l2_afp_retrieval.bayesian_nonlinear_l2fp(
+x_i_list, Fx_i_list, S_i_list = l2_afp.bayesian_nonlinear_solver(
     Se, Sa, y, x0, Kupdate, start_gamma=10.0,
-    max_iteration_ct = 2, debug_write=False, 
+    max_iteration_ct = 5, debug_write=False, 
     debug_write_prefix='test_l2_afp_match_run', 
     match_l2_fp_costfunc=True)
 

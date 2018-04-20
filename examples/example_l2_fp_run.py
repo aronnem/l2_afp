@@ -3,14 +3,15 @@ import os, shutil
 #import l2_full_physics_wrapper
 #import retrieval
 import full_physics
+from l2_afp.utils.misc import get_lua_config_files
 
 ddir = '/data/merrelli/OCO2_L2_workarea/sandbox_B8_pytest'
 L1bfile = os.path.join(ddir, 'oco2_L1bScTG_06280a_150906_B7000r_151030071317.h5')
 ECfile = os.path.join(ddir, 'oco2_ECMWFTG_06280a_150906_B7000_150906183644.h5')
 IDPfile = os.path.join(ddir, 'oco2_L2IDPTG_06280a_150906_B7000r_151030124259.h5')
 sounding_id = '2015090613050738'
-#config_file = 'custom_config_default.lua'
-config_file = 'custom_config.lua'
+
+config_file = get_lua_config_files()['default']
 merradir = '/data/OCO2/L2_datasets/merra_composite'
 abscodir = '/data/OCO2/absco'
 

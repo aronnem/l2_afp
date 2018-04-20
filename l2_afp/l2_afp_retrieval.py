@@ -1,45 +1,5 @@
 import numpy as np
-from scipy.spatial.distance import mahalanobis as mahal
-import scipy.sparse
 import h5py
-
-class diagcmatrix(scipy.sparse.dia_matrix):
-    """
-    A wrapped scipy.sparse.dia_matrix, with a slightly nicer argument 
-    format for creation (this assumes the input is a single vector, and we 
-    create a diagonal matrix with that as the center diagonal.), 
-    and an added, cached getI() method.
-
-    NOTE: the set methods are not monitored, so the getI will break if those 
-    are used. (ToDo list)
-    """
-    def __init__(self, diag, dtype=None, copy=False):
-        self._cachedI = None
-        diag = np.asarray(diag)
-        if diag.ndim > 2:
-            raise ValueError, 'input diagonal must have shape ' + \
-                ' (1,N), (N,1) or (N,)'
-        if diag.ndim == 2:
-            if (diag.shape[0] > 1) and (diag.shape[1] > 1):
-                raise ValueError, 'input diagonal must have shape ' + \
-                    ' (1,N), (N,1) or (N,)'
-            if diag.shape[1] > 1:
-                diag = diag.reshape((diag.shape[1],))
-            else:
-                diag = diag.reshape((diag.shape[0],))
-                
-        scipy.sparse.dia_matrix.__init__(
-            self, (diag, 0), shape = (diag.shape[0], diag.shape[0]), 
-            dtype = dtype, copy = copy)
-
-    def getI(self):
-        if self._cachedI is None:
-            self._computeI()
-        return self._cachedI
-
-    def _computeI(self):
-        Idiag = 1.0/self.diagonal()
-        self._cachedI = scipy.sparse.dia_matrix( (Idiag,0), self.shape )
 
 def cost_function(y, Fx, inv_Se, xa, x, inv_Sa):
     """
@@ -185,7 +145,7 @@ def _do_inversion(residual, K, Se, N, inv_Sa_scaled, Sa_sigma, gamma, x_0, x_i):
     return dx, d_sigma_sq_scaled, S_i, lhs, rhs, KtSeK
 
 
-def bayesian_nonlinear_l2fp(
+def bayesian_nonlinear_solver(
     Se, Sa, y, x0, Kupdate, 
     start_gamma = 10.0, 
     model_params = None, 

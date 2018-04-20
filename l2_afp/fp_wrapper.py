@@ -4,7 +4,7 @@ import full_physics_swig
 import full_physics
 import h5py
 
-import output_translation
+from .utils import output_translation
 
 import numpy as np
 
@@ -38,7 +38,7 @@ def get_framefp_from_sounding_id(L1bfile, sounding_id):
     return frame_number, footprint
 
 
-class wrapped_l2_fp(object):
+class wrapped_fp(object):
     """
     create a wrapped full_physics.L2run object. Contains convenience 
     methods to make this easier to run with retrieval.py
@@ -338,7 +338,7 @@ class wrapped_l2_fp(object):
         Right now, no model params are used.
 
         intended to be used inside 'retrieval', where Kupdate will be 
-        this method from an instantiated wrapped_l2_fp object.
+        this method from an instantiated wrapped_fp object.
 
         K, Fhatx = Kupdate(hatx, model_params)
 

@@ -1,4 +1,46 @@
+import pkg_resources
 import numpy as np
+import scipy.sparse
+
+
+class diagcmatrix(scipy.sparse.dia_matrix):
+    """
+    A wrapped scipy.sparse.dia_matrix, with a slightly nicer argument 
+    format for creation (this assumes the input is a single vector, and we 
+    create a diagonal matrix with that as the center diagonal.), 
+    and an added, cached getI() method.
+
+    NOTE: the set methods are not monitored, so the getI will break if those 
+    are used. (ToDo list)
+    """
+    def __init__(self, diag, dtype=None, copy=False):
+        self._cachedI = None
+        diag = np.asarray(diag)
+        if diag.ndim > 2:
+            raise ValueError, 'input diagonal must have shape ' + \
+                ' (1,N), (N,1) or (N,)'
+        if diag.ndim == 2:
+            if (diag.shape[0] > 1) and (diag.shape[1] > 1):
+                raise ValueError, 'input diagonal must have shape ' + \
+                    ' (1,N), (N,1) or (N,)'
+            if diag.shape[1] > 1:
+                diag = diag.reshape((diag.shape[1],))
+            else:
+                diag = diag.reshape((diag.shape[0],))
+                
+        scipy.sparse.dia_matrix.__init__(
+            self, (diag, 0), shape = (diag.shape[0], diag.shape[0]), 
+            dtype = dtype, copy = copy)
+
+    def getI(self):
+        if self._cachedI is None:
+            self._computeI()
+        return self._cachedI
+
+    def _computeI(self):
+        Idiag = 1.0/self.diagonal()
+        self._cachedI = scipy.sparse.dia_matrix( (Idiag,0), self.shape )
+
 
 def blk_diag(S_list):
     """
@@ -24,3 +66,24 @@ def blk_diag(S_list):
         j += j_S
         k += k_S
     return SD
+
+
+def get_lua_config_files():
+    """
+    finds the abs paths to the lua configs that are included 
+    in l2_afp. Uses pkg_resources.
+
+    """
+
+    # This is a hardcoded lists of the Lua files that are present, 
+    # so this is less than idea - needs some fixing.
+
+    lua_configs = {}
+    lua_configs['default'] = pkg_resources.resource_filename(
+        'l2_afp', 'lua_configs/custom_config.lua')
+    lua_configs['default_ABSCOv4.2'] = pkg_resources.resource_filename(
+        'l2_afp', 'lua_configs/custom_config_absco42.lua')
+
+    return lua_configs
+
+    
