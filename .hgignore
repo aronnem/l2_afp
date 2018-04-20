@@ -4,3 +4,4 @@ syntax: glob
 *.h5
 *.npz
 log
+*.png
