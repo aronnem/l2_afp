@@ -62,7 +62,7 @@ def blk_diag(S_list):
     for S in S_list:
         j_S = S.shape[0]
         k_S = S.shape[1]
-        SD[j:j+j_S,k:+k_S] = S
+        SD[j:j+j_S,k:k+k_S] = S
         j += j_S
         k += k_S
     return SD
@@ -80,7 +80,7 @@ def get_lua_config_files():
 
     lua_configs = {}
     lua_configs['default'] = pkg_resources.resource_filename(
-        'l2_afp', 'lua_configs/custom_config.lua')
+        'l2_afp', 'lua_configs/custom_config_default.lua')
     lua_configs['default_ABSCOv4.2'] = pkg_resources.resource_filename(
         'l2_afp', 'lua_configs/custom_config_absco42.lua')
 
