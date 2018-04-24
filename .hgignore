@@ -5,3 +5,6 @@ syntax: glob
 *.npz
 log
 *.png
+dist
+l2_afp.egg-info
+build
