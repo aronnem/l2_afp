@@ -1,6 +1,8 @@
 import pkg_resources
 import numpy as np
 import scipy.sparse
+from .. import _lua_config_dir
+import os.path
 
 
 class diagcmatrix(scipy.sparse.dia_matrix):
@@ -47,6 +49,13 @@ def blk_diag(S_list):
     mostly brute force block diagonal creation.
     assumes a list of S matrices, all must be 2D
     no type checking is done - output will be float native.
+
+    Parameters:
+    S_list: a list of 2D ndarrays that will be blocked into a single 2D array.
+
+    Returns:
+    SD, a simple 2D array with shape chosen to contain all arrays from 
+        the input S_list.
     """
     j_max = 0
     k_max = 0
@@ -73,16 +82,37 @@ def get_lua_config_files():
     finds the abs paths to the lua configs that are included 
     in l2_afp. Uses pkg_resources.
 
+    Returns a python dictionary with several Lua configs:
+    'default' - the default V8 config
+    'default_ABSCOv4.2' - V8, but reverting to ABSCO version 4.2
+    'watercloud_reff' - V8, but with added config for water cloud 
+        r_eff retrieval.
     """
 
     # This is a hardcoded lists of the Lua files that are present, 
     # so this is less than idea - needs some fixing.
 
     lua_configs = {}
-    lua_configs['default'] = pkg_resources.resource_filename(
-        'l2_afp', 'lua_configs/custom_config_default.lua')
-    lua_configs['default_ABSCOv4.2'] = pkg_resources.resource_filename(
-        'l2_afp', 'lua_configs/custom_config_absco42.lua')
+
+    # method via pkg_resources leaves us with a relative dirname, if 
+    # we did the import of the package inside the dir (which may be done 
+    # during testing/devel)...
+    #lua_configs['default'] = pkg_resources.resource_filename(
+    #    'l2_afp', 'lua_configs/custom_config_default.lua')
+    #lua_configs['default_ABSCOv4.2'] = pkg_resources.resource_filename(
+    #    'l2_afp', 'lua_configs/custom_config_absco42.lua')
+    #lua_configs['watercloud_reff'] = pkg_resources.resource_filename(
+    #    'l2_afp', 'lua_configs/custom_config_watercloud_reff.lua')
+
+    # ... other method, using the abs path derived in the package init
+    # should work in either case.
+    lua_configs['default'] = os.path.join(
+        _lua_config_dir, 'custom_config_default.lua')
+    lua_configs['default_ABSCOv4.2'] = os.path.join(
+        _lua_config_dir, 'custom_config_absco42.lua')
+    lua_configs['watercloud_reff'] = os.path.join(
+        _lua_config_dir, 'custom_config_watercloud_reff.lua')
+
 
     return lua_configs
 

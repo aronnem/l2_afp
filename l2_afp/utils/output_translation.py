@@ -10,6 +10,24 @@ def state_vector_splitting(x0, hatx, hatx_u, svnames):
     Note this output should match the normal 'l2_aggregate.h5' but not 
     the 'l2_plus_more' that includes RetrievalGeometry and regroups variables 
     into subgroups 'AerosolResults', 'AlbedoResults', etc.
+
+    Parameters
+    ----------
+    x0: the a priori state, with N elements
+    hatx: the retrieved state, with N elements
+    hatx_u: the uncertainty (computed from the retrieval a posteriori
+        covariance)
+    svnames: array like with state vector names
+
+    All inputs must have the same length and indexing, so the nth 
+    values all correspond to the same actual variable.
+
+    Returns
+    -------
+    sdat: the python data dictionary containing the split up state variables.
+        The key names are now the paths into the single sounding h5 file, 
+        and the values are the corresponding state variable values (or 
+        a priori values or uncertainties).
     """
 
     if (x0.shape[0] != len(svnames)) or (hatx.shape[0] != len(svnames)):
@@ -163,6 +181,28 @@ def state_vector_splitting(x0, hatx, hatx_u, svnames):
 
 
 def l2_varname_compare(l2_file1, l2_file2):
+    """
+    helper to compare the list of variables within two h5 files. this is 
+    intended to help track what variables are still lacking from the 
+    l2_afp's single sounding output, for example.
+
+    Parameters
+    ----------
+    l2_file1, l2_file2: two path+filenames to h5 files to compare. 
+        Should be l2 single sounding output, but this is actually written 
+        pretty generically so it might work on general h5 files.
+        But, note that it does not recurse deeper than 1 group level.
+
+    Returns
+    -------
+    both_item_list: items in both files
+    file1_itemlist: items that reside in only file1
+    file2_itemlist: items that reside in only file2
+
+    the item lists contain strings that are formatted like:
+    ['G /Groupname', 'V '/Groupname/variable'], with the G and V to 
+    specify the groups and variables (e.g. Array objects).
+    """
 
     h1 = tables.open_file(l2_file1, 'r')
     h2 = tables.open_file(l2_file2, 'r')
