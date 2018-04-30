@@ -1,0 +1,7 @@
+*.bak
+*.h5
+*~
+*.pyc
+build
+dist
+l2_afp.egg-info
