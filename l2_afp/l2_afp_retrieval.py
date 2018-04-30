@@ -67,12 +67,12 @@ def _check_convergence(fs_gamma2, fs_last_gamma2,
         diverged = False
 
     if debug_print:
-        print('  -> fs_last.gamma2 = ' + str(fs_last_gamma2))
-        print('  -> fs_last.gamma2_fc = ' + str(fs_last_gamma2_fc))
-        print('  -> fs.gamma2 = ' + str(fs_gamma2))
-        print('  -> r1, r2, ratio = ' + str(r1) + ',' + str(r2) + ',' + str(R))
-        print('  -> gamma last = ' + str(gamma))
-        print('  -> gamma next = ' + str(gamma_p1))
+        print(('  -> fs_last.gamma2 = ' + str(fs_last_gamma2)))
+        print(('  -> fs_last.gamma2_fc = ' + str(fs_last_gamma2_fc)))
+        print(('  -> fs.gamma2 = ' + str(fs_gamma2)))
+        print(('  -> r1, r2, ratio = ' + str(r1) + ',' + str(r2) + ',' + str(R)))
+        print(('  -> gamma last = ' + str(gamma)))
+        print(('  -> gamma next = ' + str(gamma_p1)))
 
     return gamma_p1, diverged
 
@@ -219,7 +219,7 @@ def bayesian_nonlinear_solver(
             (num_diverged <= max_num_diverged) ):
 
         if debug_write:
-            print('  -> Ps = x_i[21] ' + str(x_i[21]/100))
+            print(('  -> Ps = x_i[21] ' + str(x_i[21]/100)))
 
         # evaluate forward model, and update the residual.
         Fx_i, K_i = Kupdate(x_i, model_params)
@@ -234,7 +234,7 @@ def bayesian_nonlinear_solver(
             residual_i, K_i, Se, N, inv_Sa_scaled, Sa_sigma, gamma, x0, x_i)
 
         if debug_write:
-            print('   -> dPs = dx_i[21] ' + str(dx_i[21]/100))
+            print(('   -> dPs = dx_i[21] ' + str(dx_i[21]/100)))
 
         # we can now evaluate the divergence, with this new cost function value.
         gamma_p1, diverged = _check_convergence(
@@ -303,7 +303,7 @@ def bayesian_nonlinear_solver(
         S_i_list.append(S_i.copy())
 
         if debug_write:
-            print('  -> D_sigma_sq_scaled: ' + str(d_sigma_sq_scaled))
+            print(('  -> D_sigma_sq_scaled: ' + str(d_sigma_sq_scaled)))
         cost_function_values.append(new_cf)
         cost_function_value_forecasts.append(last_cf_forecast)
         gamma_values.append(gamma_p1)
@@ -313,7 +313,7 @@ def bayesian_nonlinear_solver(
 
         if debug_write:
             # painfully writing out every matrix, for testing purposes.
-            print('Writing K, Fhatx for iter ' + str(iter_ct)) + ' file ' + str(file_ct)
+            print(('Writing K, Fhatx for iter ' + str(iter_ct)) + ' file ' + str(file_ct))
             fname = debug_write_prefix+'_file{0:03d}.h5'.format(file_ct)
             _debug_write_file(fname, 
                               N, Sa, Sa_scaled, x0, y, 
@@ -327,8 +327,8 @@ def bayesian_nonlinear_solver(
             file_ct += 1
 
             
-            print (
+            print((
                 'Iter Stat: {0:d}, {1:d} max iter'.format(iter_ct,max_iteration_ct)+
-                ', divergences: {0:d}, {1:d} max'.format(num_diverged, max_num_diverged))
+                ', divergences: {0:d}, {1:d} max'.format(num_diverged, max_num_diverged)))
 
     return x_i_list, Fx_i_list, S_i_list

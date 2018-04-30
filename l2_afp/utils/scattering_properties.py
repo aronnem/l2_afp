@@ -40,7 +40,7 @@ def _parse_mom_chunk(llist, ctr):
     npts = int(toks[1])
     Pnn = np.zeros((npts,6))
     for n in range(npts):
-        Pnn[n,:] = map(float,llist[ctr+1+n].split())
+        Pnn[n,:] = list(map(float,llist[ctr+1+n].split()))
     return wlen, Pnn
 
 
@@ -92,7 +92,7 @@ def read_mie_mom_file(fileroot):
     for n in range(6):
         wlen, Pnn = _parse_mom_chunk(llist, ctr)
         if wlen != dat['wlen'][n]:
-            print('Wavelen mismatch: {0:f} {1:f}'.format(wlen,dat['slen'][n]))
+            print(('Wavelen mismatch: {0:f} {1:f}'.format(wlen,dat['slen'][n])))
         dat['Pnn'][n] = Pnn
         ctr = ctr + 1 + Pnn.shape[0]
 
@@ -181,7 +181,7 @@ def aggregate_properties(mmfile_list, r_eff_list, out_file, prop_name_out):
         In addition, adds a key 'r_eff' with the input r_eff_list.
     """
 
-    mmdata = map(read_mie_mom_file, mmfile_list)
+    mmdata = list(map(read_mie_mom_file, mmfile_list))
     nprops = len(mmfile_list)
 
     adat = {}

@@ -19,12 +19,12 @@ class diagcmatrix(scipy.sparse.dia_matrix):
         self._cachedI = None
         diag = np.asarray(diag)
         if diag.ndim > 2:
-            raise ValueError, 'input diagonal must have shape ' + \
-                ' (1,N), (N,1) or (N,)'
+            raise ValueError('input diagonal must have shape ' + \
+                ' (1,N), (N,1) or (N,)')
         if diag.ndim == 2:
             if (diag.shape[0] > 1) and (diag.shape[1] > 1):
-                raise ValueError, 'input diagonal must have shape ' + \
-                    ' (1,N), (N,1) or (N,)'
+                raise ValueError('input diagonal must have shape ' + \
+                    ' (1,N), (N,1) or (N,)')
             if diag.shape[1] > 1:
                 diag = diag.reshape((diag.shape[1],))
             else:

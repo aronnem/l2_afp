@@ -23,7 +23,7 @@ def _extract_array(alines, n):
             aline_clean = alines[n2].replace('[','').replace(']','')
             aline_toks = aline_clean.split()
             i2 = i1 + len(aline_toks)
-            x[i1:i2] =  map(float,aline_toks)
+            x[i1:i2] =  list(map(float,aline_toks))
             i1 = i2
         n2 += 1
 
