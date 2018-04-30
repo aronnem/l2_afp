@@ -68,7 +68,7 @@ out, outerr = l2run.config.output()
 # Run sounding
 log_timing = fp.LogTiming()
 l2run.forward_model.setup_grid()
-print(l2run.forward_model)
+print((l2run.forward_model))
 log_timing.write_to_log("Initialization")
 l2run.solver.add_observer(log_timing)
 success = False

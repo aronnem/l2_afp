@@ -555,7 +555,7 @@ class wrapped_fp_watercloud_reff(wrapped_fp):
         # this shortcuts super.__init__(), because there are a lot 
         # of calcs related to the sample index, band slices, etc, 
         # that we do not need to redo.
-        print('** refreshing L2Run to reff = {0:9.5f} **'.format(self._reff))
+        print(('** refreshing L2Run to reff = {0:9.5f} **'.format(self._reff)))
         self._L2run = full_physics.L2Run(*self._arg_list, **self._kw_dict)
         self._L2run.forward_model.setup_grid()
         # assumes we now have this reff (should be in synch, but this might 
@@ -571,7 +571,7 @@ class wrapped_fp_watercloud_reff(wrapped_fp):
         # 2) store into l2_static file
         # 3) store in variable.
         # 4?) could trigger L2run refresh, if reff is different than self._reff?
-        print('** updating props to reff = {0:9.5f} **'.format(reff))
+        print(('** updating props to reff = {0:9.5f} **'.format(reff)))
         # this file name is awkwardly a copy/pasted name from the lua 
         # config file that we use (custom_config_watercloud_reff.lua)
         # and I think currently assumes this happens to be in the current dir.
