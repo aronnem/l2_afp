@@ -140,6 +140,12 @@ def write_aggregated_properties(out_file, prop_name_out, adat):
                 tmp_array = np.zeros(adat['Source'].shape, dtype=dt)
                 tmp_array[:] = adat['Source']
                 h[vpath] = tmp_array
+            elif var == 'Phase Function Moment Convention':
+                print(type(adat['Phase Function Moment Convention']))
+                dt = 'S'+str(len(adat['Phase Function Moment Convention'][0]))
+                tmp_array = np.zeros(len(adat['Phase Function Moment Convention']), dtype=dt)
+                tmp_array[:] = adat['Phase Function Moment Convention']
+                h[vpath] = tmp_array   
             else:
                 h[vpath] = adat[var]
 
@@ -406,14 +412,21 @@ def write_variable_properties(h5file, prop_name, prop_data):
                     del h[vpath]
                     h[vpath] = prop_data[var]
                 else:
-                    h[vpath][:] = prop_data[var]
+                    if var == "Phase Function Moment Convention":
+                        h[vpath][:] = np.array(prop_data[var],dtype='S8')
+                    if var == "Source":
+                        h[vpath][:] = np.array(prop_data[var],dtype='S26')
+                    else:               
+                        h[vpath][:] = prop_data[var]
         else:
             # creating new variables
             for var in _expected_table_vars:
                 vpath = gpath+'/'+var
                 # getting error here for 'Phase Function Moment Convention'
                 # TypeError: Invalid index for scalar dataset (only ..., () allowed)
-                h[vpath] = prop_data[var]
+                if var=="Phase Function Moment Convention": h[vpath] = np.array(prop_data[var],dtype='S8')
+                elif var=="Source": h[vpath] = np.array(prop_data[var],dtype='S26')
+                else: h[vpath] = prop_data[var]
 
 
 def thin_aerosol_table(in_file, out_file):
