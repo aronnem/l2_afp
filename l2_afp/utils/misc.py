@@ -112,6 +112,8 @@ def get_lua_config_files():
         _lua_config_dir, 'custom_config_absco42.lua')
     lua_configs['watercloud_reff'] = os.path.join(
         _lua_config_dir, 'custom_config_watercloud_reff.lua')
+    lua_configs['DU_reff'] = os.path.join(
+        _lua_config_dir, 'custom_config_DU_reff.lua')
 
 
     return lua_configs

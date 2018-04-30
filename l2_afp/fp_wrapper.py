@@ -660,3 +660,218 @@ class wrapped_fp_watercloud_reff(wrapped_fp):
     def write_h5_output_file_test(self):
         # I think this needs update, because the state has changed
         raise NotImplementedError()
+
+
+class wrapped_fp_DU_reff(wrapped_fp):
+    """
+    creates a wrapped full_physics.L2run object, but includes 
+    extra code to implement r_eff derivative. This is 
+    automatically appended to the state dimension.
+    """
+
+    @staticmethod
+    def _read_reff_from_static_file(hfile):
+        # note - assumes the 'Source' variable is a 1-element array of string
+        with h5py.File(hfile,'r') as h:
+            sprop_var = h.get('/DU_variable/Properties/Source')
+        # this is a bit of a hack - the var is None if this variable does 
+        # not exist in the file; setting to -9999 should cause the code later 
+        # to automatically refill the variable properties before they are 
+        # actually needed.
+        if sprop_var is None:
+            reff = -9999.0
+        else:
+            reff = float(sprop_var[0].split('=')[-1])
+        return reff
+
+
+    def __init__(self, wrkdir, scattering_property_file,
+                 L1bfile, ECMWFfile, 
+                 merradir, abscodir, DU_grid_file,
+                 reff_prior_mean = 4.0, reff_prior_stdv = 2.0, 
+                 reff_increment = 0.05, **kwarg):
+        """
+        see wrapped_fp init, with the exception that this uses a 
+        particular config file.
+        """
+
+        # Here's the clunky/brittle part.
+        # Right now I have the Lua config pointed to a file named 
+        # "l2_aerosol_wc_variable.h5" with no path, so it needs to be 
+        # in the same directory as the lua file. So for now, 
+        # these will just be both copied into the wrk dir, and we are 
+        # not going to bother cleaning them up.
+        lua_config_src = get_lua_config_files()['DU_reff']
+        lua_config_dst = os.path.join(wrkdir, os.path.basename(lua_config_src))
+        scattering_property_file_src = scattering_property_file
+        scattering_property_file_dst = os.path.join(
+            wrkdir, "l2_aerosol_DU_variable.h5")
+
+        # This not amenable to any sort of parallel jobs, unless the caller 
+        # sets the wrkdir independently to each job.
+        # this should just overwrite the contents, without erroring 
+        # (unless something changed the file to read only)
+        shutil.copyfile(lua_config_src, lua_config_dst)
+        shutil.copyfile(scattering_property_file_src, 
+                        scattering_property_file_dst)
+
+        self._reff = reff_prior_mean
+        self._reff_var = reff_prior_stdv**2
+        self._reff_incr = reff_increment
+        self._DU_grid_file = DU_grid_file
+
+        # The L2Run object will initially be set to the same value 
+        # as existed in the file, so read the value
+        self._staticprops_reff = self._read_reff_from_static_file(
+            scattering_property_file_dst)
+
+        # if this is -9999, means there is no data yet for the 
+        # variable properties. Force one update cycle to create it, 
+        # equal to the prior mean.
+        if self._staticprops_reff == -9999:
+            print('self updating reff variable')
+            self._update_DU_props(reff_prior_mean)
+        self._L2run_reff = self._staticprops_reff
+
+        print('Reffs at start: ', self._L2run_reff, self._staticprops_reff)
+
+        # I think this needs to happen first?
+        # _update_watercloud_props(reff_prior_mean)
+
+        arg = (L1bfile, ECMWFfile, lua_config_dst, merradir, abscodir)
+
+        super(wrapped_fp_DU_reff, self).__init__(*arg, **kwarg)
+
+        # most methods will fall to super class, as desired:
+        # get_sample_indexes(), get_noise(), get_y(), get_Se_diag()
+        #
+        # ones involving state variables are intercepted here and 
+        # altered: get_x(), set_x(), get_Sa(), set_Sa(), 
+        # get_state_variable_names(), jacobian_run(), forward_run(), 
+        # write_h5_output_file.
+        # Kupdate() is the most important since that 
+        # will be used by the retrieval.
+
+        # udpate the state and prior covars to inclue the 
+        # prior mean and stdv.
+        self._Sa_augmented = blk_diag(
+            [self._apriori_covariance, np.zeros((1,1))+self._reff_var])
+
+        self._state_first_guess = np.concatenate(
+            [self._state_first_guess, [self._reff]])
+        self._apriori_covariance = self._Sa_augmented.copy()
+
+        # this also needs a copy stored separately, because it will need 
+        # to be restored during a L2Run refresh.
+        self._x = self.get_x()
+
+
+    def _refresh_L2Run(self):
+        # this shortcuts super.__init__(), because there are a lot 
+        # of calcs related to the sample index, band slices, etc, 
+        # that we do not need to redo.
+        print('** refreshing L2Run to reff = {0:9.5f} **'.format(self._reff))
+        self._L2run = full_physics.L2Run(*self._arg_list, **self._kw_dict)
+        self._L2run.forward_model.setup_grid()
+        # assumes we now have this reff (should be in synch, but this might 
+        # be a potential trouble spot...)
+        self._L2run_reff = self._reff
+        # restore the state vector into L2Run. need to do this through super(),
+        # for the part of the state vector used in L2Run.
+        super(wrapped_fp_DU_reff, self).set_x(self._x[:-1])
+        
+        
+    def _update_DU_props(self, reff):
+        # 1) get water cloud properties by interpolation at reff
+        # 2) store into l2_static file
+        # 3) store in variable.
+        # 4?) could trigger L2run refresh, if reff is different than self._reff?
+        print('** updating props to reff = {0:9.5f} **'.format(reff))
+        # this file name is awkwardly a copy/pasted name from the lua 
+        # config file that we use (custom_config_watercloud_reff.lua)
+        # and I think currently assumes this happens to be in the current dir.
+        static_l2_file = "l2_aerosol_DU_variable.h5"
+        # more awkward name
+        grid_prop_name = "DU_grid"
+        out_prop_name = "DU_variable"
+
+        pdata = scattering_properties.interpolate_by_reff(
+            self._DU_grid_file, grid_prop_name, reff)
+        scattering_properties.write_variable_properties(
+            static_l2_file, out_prop_name, pdata)
+        self._staticprops_reff = reff
+
+
+    def get_x(self):
+        x0 = super(wrapped_fp_DU_reff, self).get_x()
+        x0 = np.concatenate([x0, np.zeros(1)+self._reff])
+        return x0
+
+    def set_x(self, x_new):
+        super(wrapped_fp_DU_reff, self).set_x(x_new[:-1])
+        self._reff = x_new[-1]
+        self._x = x_new.copy()
+
+    def get_Sa(self):
+        Sa = super(wrapped_fp_DU_reff, self).get_Sa()
+        Sa = blk_diag([Sa, np.zeros((1,1))+self._reff_var])
+        return Sa
+
+    def set_Sa(self, S_new):
+        super(wrapped_fp_DU_reff, self).set_Sa(S_new[:-1,:-1])
+        self._reff_var = S_new[-1,-1]
+        self._Sa_augmented = S_new.copy()
+
+    def get_state_variable_names(self):
+        svnames = \
+            super(wrapped_fp_DU_reff, self).get_state_variable_names()
+        svnames.append('Water_Reff')
+        return svnames
+
+    def _ensure_synched_reff(self):
+        if self._staticprops_reff != self._reff:
+            self._update_DU_props(self._reff)
+        if self._L2run_reff != self._reff:
+            self._refresh_L2Run()
+
+    def forward_run(self, band='all'):
+        # if the reff has changed, need to refresh the static data and L2Run.
+        self._ensure_synched_reff()
+        return super(wrapped_fp_DU_reff, self).forward_run(band=band)
+
+    
+    def jacobian_run(self, band='all'):
+        # if the reff has changed, need to refresh the static data and L2Run.
+        self._ensure_synched_reff()
+        wl,I,K = super(wrapped_fp_DU_reff, self).jacobian_run(band=band)
+
+        K_reff = self._reff_derivative(band=band)
+        K_aug = np.concatenate([K, K_reff], axis=1)
+
+        return wl, I, K_aug
+
+    def _reff_derivative(self, band='all'):
+
+        # store base value, before we perturb it.
+        base_reff = self._reff
+        # perturbed values.
+        reff_d1 = base_reff * (1 - 0.5*self._reff_incr)
+        reff_d2 = base_reff * (1 + 0.5*self._reff_incr)
+
+        self._reff = reff_d1
+        wl, I1 = self.forward_run(band=band)
+        self._reff = reff_d2
+        wl, I2 = self.forward_run(band=band)
+
+        dIdR = (I2 - I1) / (self._reff_incr*base_reff)
+        dIdR = np.reshape(dIdR, (dIdR.shape[0],1))
+
+        # restore original value
+        self._reff = base_reff
+
+        return dIdR
+
+
+    def write_h5_output_file_test(self):
+        # I think this needs update, because the state has changed
+        raise NotImplementedError()
