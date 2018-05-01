@@ -465,7 +465,12 @@ class wrapped_fp(object):
         with h5py.File(filename, 'w') as h:
             for vname in dat:
                 if len(dat[vname]) > 1:
-                    h.create_dataset(vname, data=dat[vname][s])
+                    #Hackish way to write strings instead of bytes to appease h5py
+                    try: h.create_dataset(vname, data=dat[vname][s])
+                    except:
+                        tmp_array = np.zeros((len(dat[vname])),dtype='S59')
+                        tmp_array[:] = dat[vname]
+                        h.create_dataset(vname, data=tmp_array[s])
                 else:
                     h.create_dataset(vname, data=dat[vname])
 
