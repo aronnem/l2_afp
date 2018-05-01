@@ -388,6 +388,20 @@ class wrapped_fp(object):
         caller uses the afp to find the state estimate.
         """
 
+        # get xco2 for the final state. We have to on the fly alter the 
+        # contents of the state vector, since the xco2 attribute is computed 
+        # based on the current value of the state.
+        if final_state is None:
+            xco2 = [np.nan]
+        else:
+            # store current x, so we can restore the value after
+            orig_x = self.get_x()
+            self.set_x(final_state)
+            # the attribute is XCO2 converted to ppm, but in order to make
+            # this match the typical l2 output, convert to simple molar ratio
+            xco2 = self._L2run.xco2 * 1e-6
+            self.set_x(orig_x)
+
         if final_state is None:
             if self._L2run.solver.x_solution.shape[0] > 0:
                 final_state = self._L2run.solver.x_solution.copy()
@@ -437,7 +451,8 @@ class wrapped_fp(object):
         dat['/SpectralParameters/modeled_radiance'] = modeled_rad
         dat['/SpectralParameters/sample_indexes'] = self.get_sample_indexes()
 
-        dat['/RetrievalResults/xco2'] = [self._L2run.xco2]
+        # note this was computed above
+        dat['/RetrievalResults/xco2'] = [xco2]
 
         s = np.newaxis, Ellipsis
 
@@ -610,7 +625,7 @@ class wrapped_fp_watercloud_reff(wrapped_fp):
     def get_state_variable_names(self):
         svnames = \
             super(wrapped_fp_watercloud_reff, self).get_state_variable_names()
-        svnames.append('Water_Reff')
+        svnames += ('Water_Reff',)
         return svnames
 
     def _ensure_synched_reff(self):
@@ -715,6 +730,7 @@ class wrapped_fp_DU_reff(wrapped_fp):
         shutil.copyfile(scattering_property_file_src, 
                         scattering_property_file_dst)
 
+        self._reff_prior = reff_prior_mean
         self._reff = reff_prior_mean
         self._reff_var = reff_prior_stdv**2
         self._reff_incr = reff_increment
@@ -825,7 +841,7 @@ class wrapped_fp_DU_reff(wrapped_fp):
     def get_state_variable_names(self):
         svnames = \
             super(wrapped_fp_DU_reff, self).get_state_variable_names()
-        svnames.append('Water_Reff')
+        svnames += ('DU_Reff',)
         return svnames
 
     def _ensure_synched_reff(self):
@@ -872,6 +888,31 @@ class wrapped_fp_DU_reff(wrapped_fp):
         return dIdR
 
 
-    def write_h5_output_file_test(self):
-        # I think this needs update, because the state has changed
-        raise NotImplementedError()
+    def write_h5_output_file(self, filename,
+                             final_state=None, final_uncert=None,
+                             modeled_rad=None):
+
+        super(wrapped_fp_DU_reff, self).write_h5_output_file(
+            filename, final_state=final_state, 
+            final_uncert=final_uncert,
+            modeled_rad=modeled_rad)
+
+        dat = {}
+
+        # handle the augmented variable (reff)
+        dat['/RetrievalResults/DU_reff_apriori'] = [self._reff_prior]
+
+        if final_state is not None:
+            dat['/RetrievalResults/DU_reff'] = [final_state[-1]]
+        else:
+            dat['/RetrievalResults/DU_reff'] = [np.nan]
+
+        if final_uncert is not None:
+            dat['/RetrievalResults/DU_reff_uncert'] = [final_uncert[-1]]
+        else:
+            dat['/RetrievalResults/DU_reff_uncert'] = [np.nan]
+
+
+        with h5py.File(filename, 'a') as h:
+            for vname in dat:
+                h.create_dataset(vname, data=dat[vname])
