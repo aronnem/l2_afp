@@ -5,18 +5,19 @@ import numpy as np
 
 import l2_afp
 
-ddir = '/data/merrelli/OCO2_L2_workarea/sandbox_B8_pytest'
-L1bfile = os.path.join(ddir, 'oco2_L1bScTG_06280a_150906_B7000r_151030071317.h5')
-ECfile = os.path.join(ddir, 'oco2_ECMWFTG_06280a_150906_B7000_150906183644.h5')
-IDPfile = os.path.join(ddir, 'oco2_L2IDPTG_06280a_150906_B7000r_151030124259.h5')
-sounding_id = '2015090613050738'
+ddir = '/data/merrelli/OCO2_cld_reff_test'
+L1bfile = os.path.join(ddir,'oco2_L1bScND_07216a_151109_B8000r_170703121429.h5')
+IDPfile = os.path.join(ddir,'oco2_L2IDPND_07216a_151109_B8100r_170730204402.h5')
+Metfile = os.path.join(ddir,'oco2_L2MetND_07216a_151109_B8000r_170703000620.h5')
+# a probably clear FOV over OK or KS
+sounding_id = '2015110919384031'
 
 config_file = l2_afp.utils.get_lua_config_files()['default']
 merradir = '/data/OCO2/L2_datasets/merra_composite'
 abscodir = '/data/OCO2/absco'
 
 l2_obj = l2_afp.wrapped_fp(
-    L1bfile, ECfile, config_file, merradir, abscodir, 
+    L1bfile, Metfile, config_file, merradir, abscodir, 
     sounding_id = sounding_id, imap_file = IDPfile)
 
 Sa = l2_obj.get_Sa()
