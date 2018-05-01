@@ -414,7 +414,7 @@ def write_variable_properties(h5file, prop_name, prop_data):
                 else:
                     if var == "Phase Function Moment Convention":
                         h[vpath][:] = np.array(prop_data[var],dtype='S8')
-                    if var == "Source":
+                    elif var == "Source":
                         h[vpath][:] = np.array(prop_data[var],dtype='S26')
                     else:               
                         h[vpath][:] = prop_data[var]
