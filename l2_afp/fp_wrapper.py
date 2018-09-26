@@ -368,12 +368,11 @@ class wrapped_fp(object):
         if cov_a is None:
             cov_a = self._apriori_covariance
 
-        self._L2run.solver.solve(x_i, x_a, cov_a)
+        res = self._L2run.solver.solve(x_i, x_a, cov_a)
 
         hatx = self._L2run.solver.x_solution.copy()
-        
 
-        return 
+        return res, hatx
 
 
     def write_h5_output_file(self, filename, 
