@@ -133,6 +133,13 @@ class wrapped_fp(object):
             self._sample_indexes.append( 
                 grid_obj.low_resolution_grid(b).sample_index.copy()-1 )
 
+        output_objs = self._L2Run.config.output()
+        self._L2Run_output = output_objs[0]
+        self._L2Run_error_output = output_objs[1]
+
+        self._solve_called = False
+        self._solve_completed = False
+
         # TBD - there are other 'derived' values that could be usefully 
         # extracted from the L1b file during setup:
         # retrieval times (string and tai93), operation_mode, 
@@ -381,6 +388,16 @@ class wrapped_fp(object):
         covariance to be changed.
         Note if any of the three are used, the stored values are used 
         (FG is the prior)
+
+        return values are:
+        solve_result: this will be None if the retrieval crashed; 
+            otherwise it will be equal to True/False depending on 
+            whether the converge criteria were met.
+        hatx: state vector at the final iteration.
+        hatS: posterior covariance at the final iteration.
+
+        note, if solve_result is None (meaning a crash), then hatx and 
+        hatS are also None.
         """
 
         if x_i is None:
@@ -390,11 +407,87 @@ class wrapped_fp(object):
         if cov_a is None:
             cov_a = self._apriori_covariance
 
-        res = self.L2Run.solver.solve(x_i, x_a, cov_a)
+        # some strange construct here:
+        # if an exception occurs, that likely means a forward model 
+        # crash, and thus no reliable output. use solve_completed
+        # to signify this.
+        # whether or not the retrieval converged, is noted by the solve 
+        # result. this should be None (if crashed), or True/False.
+        # those values all need to be stored, as it affects how the 
+        # FPformat write functions are run.
+        solve_result = None
+        self._solve_called = True
+        try:
+            solve_result = self._L2Run.solver.solve(x_i, x_a, cov_a)
+            self._solve_completed = True
+        except:
+            self._solve_completed = False
 
-        hatx = self.L2Run.solver.x_solution.copy()
+        self._solve_converged = solve_result
 
-        return res, hatx
+        if solve_result is not None:
+
+            # I think, the solver does not update itself with the 
+            # state estimate. we need to do that ourselves
+            hatx = self._L2Run.solver.x_solution
+            hatS = self._L2Run.solver.aposteriori_covariance
+            self._L2Run.state_vector.update_state(hatx, hatS)
+
+            # copy these for output
+            return_x = hatx.copy()
+            return_S = hatS.copy()
+
+        else:
+            solve_result = None
+            return_x = None
+            return_S = None
+
+        return solve_result, return_x, return_S
+
+
+    def write_h5_output_file_FPformat(self, filename):
+        """
+        write output file using operational "Full Physics" 
+        single-sounding output method. This is the best option, since 
+        it includes additional variables related to the solver steps, 
+        that would not otherwise be included in the file, since they 
+        are not exposed to python
+        (at least, I don't know how to get the data)
+
+        Note:
+        ** This method only works if the operational solve() is called.
+        ** It also must necessarily delete the internal L2Run object 
+           to actually write and close the file. This will render most 
+           of the methods inoperable.
+        """
+
+        if not self._solve_called:
+            raise ValueError('solve() method must be called first '+
+                             'before FPformat data can be written')
+
+        cwd = os.getcwd()
+        if self._solve_completed:
+            self._L2Run_output.write()
+            output_filename = filename
+            written_filename = os.path.join(cwd,'out.h5')
+        else:
+            self._L2Run_error_output.write_best_attempt()
+            output_filename = filename+'.error'
+            written_filename = os.path.join(cwd,'out.h5.error')
+            written_filename = 'out.h5.error'
+
+        self._close_L2Run()
+
+        # if the the write() fails, or doesn't close, we might have 
+        # either no file or a 'generating' file. in either case, 
+        # this would cause a mysterious file not found error; catch 
+        # the except and re-raise a better error message.
+        try:
+            shutil.move(written_filename, output_filename)
+        except:
+            raise RuntimeError(
+                'L2_FP object appears to have failed to write or close '+
+                'the expected h5 file: '+written_filename)
 
 
     def write_h5_output_file(self, filename, 
@@ -486,6 +579,9 @@ class wrapped_fp(object):
         deletes the L2Run object. This is required to get the 
         operational output file to be finalized and closed correctly.
         """
+
+        self._L2Run_output = None
+        self._L2Run_error_output = None
 
         # put this in a try/finally block, just in case something odd happens 
         # on the delete. This will make sure the attribute it set back to 
@@ -592,6 +688,9 @@ class wrapped_fp_watercloud_reff(wrapped_fp):
         print(('** refreshing L2Run to reff = {0:9.5f} **'.format(self._reff)))
         self._L2Run = full_physics.L2Run(*self._arg_list, **self._kw_dict)
         self._L2Run.forward_model.setup_grid()
+        output_objs = self._L2Run.config.output()
+        self._L2Run_output = output_objs[0]
+        self._L2Run_error_output = output_objs[1]
         # assumes we now have this reff (should be in synch, but this might 
         # be a potential trouble spot...)
         self._L2Run_reff = self._reff
