@@ -422,8 +422,13 @@ class wrapped_fp(object):
         dat['/RetrievedStateVector/state_vector_apriori_uncert'] = \
             np.sqrt(np.diag(self._apriori_covariance))
         dat['/RetrievedStateVector/state_vector_result'] = final_state
-        dat['/RetrievedStateVector/state_vector_names'] = \
-            np.array(self.get_state_variable_names())
+        # convert python strings (that are unicode by default) into 
+        # ascii strings; h5py can only write the simple ascii-encoding.
+        # I think we can rely on numpy's dtype to do the encoding, 
+        # instead of python's string.encode()
+        svnames = self.get_state_variable_names()
+        svnames = np.array(svnames, dtype='S')
+        dat['/RetrievedStateVector/state_vector_names'] = svnames
 
         sounding_id = np.zeros(1, dtype=np.int64)
         sounding_id[0] = int(self._sounding_id)
