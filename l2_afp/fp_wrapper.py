@@ -58,7 +58,8 @@ class wrapped_fp(object):
                  imap_file = None, 
                  sounding_id = None, 
                  frame_number = None, 
-                 footprint = None):
+                 footprint = None,
+                 enable_console_log = True):
 
         if (frame_number is None or footprint is None) and \
                 (sounding_id is None):
@@ -82,6 +83,9 @@ class wrapped_fp(object):
         # create the full physics L2Run object. This is the main 
         # interface to the l2_fp application.
         self._L2Run = full_physics.L2Run(*arg_list, **kw_dict)
+
+        if enable_console_log is False:
+            self._L2Run.config.logger.turn_off_logger()
 
         # so - the grid may depend on the prior data (I think).
         # unknown at this point, whether a state vector change would require 
