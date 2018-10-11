@@ -45,7 +45,7 @@ def get_framefp_from_sounding_id(L1bfile, sounding_id):
 
 class wrapped_fp(object):
     """
-    create a wrapped full_physics.L2run object. Contains convenience 
+    create a wrapped full_physics.L2Run object. Contains convenience 
     methods to make this easier to run with retrieval.py
 
     In general, throughout the class code, when we extract data out of 
@@ -79,28 +79,28 @@ class wrapped_fp(object):
         self._kw_dict = kw_dict
         self._sounding_id = sounding_id
 
-        # create the full physics L2Eun object. This is the main 
+        # create the full physics L2Run object. This is the main 
         # interface to the l2_fp application.
-        self._L2run = full_physics.L2Run(*arg_list, **kw_dict)
+        self._L2Run = full_physics.L2Run(*arg_list, **kw_dict)
 
         # so - the grid may depend on the prior data (I think).
         # unknown at this point, whether a state vector change would require 
         # the grid to be setup again. For now, assuming no.
-        self._L2run.forward_model.setup_grid()
+        self._L2Run.forward_model.setup_grid()
 
         # Extract some parameters:
         #
 
         # 0) the apriori covariance and first guess
         self._state_first_guess = \
-            self._L2run.state_vector.state.copy()
+            self._L2Run.state_vector.state.copy()
         self._apriori_covariance = \
-            self._L2run.state_vector.state_covariance.copy()
+            self._L2Run.state_vector.state_covariance.copy()
 
         # 1) channel ranges (start/stop channel numbers) for each band;
         #   (channels outside this range are not used.
         self._channel_ranges = \
-            self._L2run.spectral_window.range_array.value[:,0,:].astype(int)
+            self._L2Run.spectral_window.range_array.value[:,0,:].astype(int)
 
         # 2) convert the channel ranges to python slice objects (for ease 
         # of use layer on.)
@@ -119,7 +119,7 @@ class wrapped_fp(object):
             bad_sample_mask = np.ones(1016, np.bool)
             s = self._band_slices[b]
             bad_sample_mask[s] = \
-                self._L2run.spectral_window.bad_sample_mask[b,s]
+                self._L2Run.spectral_window.bad_sample_mask[b,s]
             self._sample_masks[:,b] = bad_sample_mask == 0
 
         # 4) attempt to get the sample indexes from other internal object.
@@ -128,7 +128,7 @@ class wrapped_fp(object):
         # often step 3) would be one sample off.
         self._sample_indexes = []
         # copy grid_obj to shorten syntax.
-        grid_obj = self._L2run.forward_model.spectral_grid
+        grid_obj = self._L2Run.forward_model.spectral_grid
         for b in range(3):
             self._sample_indexes.append( 
                 grid_obj.low_resolution_grid(b).sample_index.copy()-1 )
@@ -141,6 +141,28 @@ class wrapped_fp(object):
         # in the mocked-up l2 files that are created  - 
         # see write_h5_output_file().
 
+
+    def _get_L2Run(self):
+        """
+        internal helper to get the L2Run object. This only exists to 
+        allow a more useful Exception string to be printed, if something 
+        attempts to use the object after a single-sounding format output 
+        file is written, which has to delete the L2Run as a side effect.
+
+        After the __init__() finishes, all references to the L2Run object 
+        (even internal methods) should use the L2Run property (which 
+        calls this function) rather than referencing the _L2Run attribute.
+        """
+
+        if self._L2Run:
+            return self._L2Run
+        else:
+            raise ValueError(
+                'L2Run object has been closed, and this operation '+
+                'is no longer possible.')
+
+    L2Run = property(_get_L2Run, None, None,
+                     'Access full_physics.L2Run object')
 
     def get_sample_indexes(self, band='all'):
         """
@@ -178,8 +200,8 @@ class wrapped_fp(object):
             noise = np.concatenate(noise_per_band)
         else:
             b = band-1
-            radiance_all = self._L2run.level_1b.radiance(b).data.copy()
-            noise_all = self._L2run.level_1b.noise_model.uncertainty(
+            radiance_all = self.L2Run.level_1b.radiance(b).data.copy()
+            noise_all = self.L2Run.level_1b.noise_model.uncertainty(
                 b, radiance_all)
             noise = noise_all[self._sample_indexes[b]]
 
@@ -201,7 +223,7 @@ class wrapped_fp(object):
             y = np.concatenate(y_per_band)
         else:
             b = band-1
-            radiance_all = self._L2run.level_1b.radiance(b).data.copy()
+            radiance_all = self.L2Run.level_1b.radiance(b).data.copy()
             y = radiance_all[self._sample_indexes[b]]
         return y
 
@@ -229,15 +251,15 @@ class wrapped_fp(object):
 
         see get_state_variable_names, in order to get the variable list.
         """
-        x = self._L2run.state_vector.state.copy()
-        S = self._L2run.state_vector.state_covariance.copy()
+        x = self.L2Run.state_vector.state.copy()
+        S = self.L2Run.state_vector.state_covariance.copy()
         
         if x_new.shape != x.shape:
             raise ValueError('shape mismatch, x_new.shape = ' + 
                              str(x_new.shape) + ' , x.shape = ' + 
                              str(x.shape))
         # I think we need to carry this through a copy of S ?
-        self._L2run.state_vector.update_state(x_new, S)
+        self.L2Run.state_vector.update_state(x_new, S)
 
 
     def get_state_variable_names(self):
@@ -245,7 +267,7 @@ class wrapped_fp(object):
         return the state variable names, in order, as a python tuple 
         of strings.
         """
-        svnames = self._L2run.state_vector.state_vector_name
+        svnames = self.L2Run.state_vector.state_vector_name
         return svnames
 
 
@@ -259,14 +281,14 @@ class wrapped_fp(object):
 
         see get_state_variable_names, in order to get the variable list.
         """
-        x = self._L2run.state_vector.state.copy()
-        S = self._L2run.state_vector.state_covariance.copy()
+        x = self.L2Run.state_vector.state.copy()
+        S = self.L2Run.state_vector.state_covariance.copy()
         if S_new.shape != S.shape:
             raise ValueError('shape mismatch, S_new.shape = ' + 
                              str(S_new.shape) + ' , S.shape = ' + 
                              str(S.shape))
         # I think we need to carry this through a copy of x ?
-        self._L2run.state_vector.update_state(x, S_new)
+        self.L2Run.state_vector.update_state(x, S_new)
 
 
     def get_x(self):
@@ -275,7 +297,7 @@ class wrapped_fp(object):
 
         return is a 1D array with shape (v,) for v state variables.
         """
-        return self._L2run.state_vector.state.copy()
+        return self.L2Run.state_vector.state.copy()
 
 
     def get_Sa(self):
@@ -284,7 +306,7 @@ class wrapped_fp(object):
 
         return is a 2D array with shape (v, v) for v state variables.
         """
-        return self._L2run.state_vector.state_covariance.copy()
+        return self.L2Run.state_vector.state_covariance.copy()
 
 
     def forward_run(self, band='all'):
@@ -298,13 +320,13 @@ class wrapped_fp(object):
         I - modeled radiance at the used spectral channels, in L1b units
            1D array with shape (w,), for w used samples.
         """
-        if self._L2run is None:
+        if self.L2Run is None:
             raise ValueError('L2 object is closed - no further runs possible')
         if band == 'all':
-            fm_result = self._L2run.forward_model.radiance_all(True)
+            fm_result = self.L2Run.forward_model.radiance_all(True)
         else:
             b = band-1
-            fm_result = self._L2run.forward_model.radiance(b,True)
+            fm_result = self.L2Run.forward_model.radiance(b,True)
         wl = fm_result.wavelength.copy()
         I = fm_result.value.copy()
         return wl, I
@@ -323,13 +345,13 @@ class wrapped_fp(object):
            1D array with units (same as I) per state vector unit.
            shape (w, v) for w used samples, and v state variables
         """ 
-        if self._L2run is None:
+        if self.L2Run is None:
             raise ValueError('L2 object is closed - no further runs possible')
         if band == 'all':
-            fm_result = self._L2run.forward_model.radiance_all(False)
+            fm_result = self.L2Run.forward_model.radiance_all(False)
         else:
             b = band-1
-            fm_result = self._L2run.forward_model.radiance(b,False)
+            fm_result = self.L2Run.forward_model.radiance(b,False)
         wl = fm_result.wavelength.copy()
         I = fm_result.value.copy()
         K = fm_result.spectral_range.data_ad.jacobian.copy()
@@ -368,9 +390,9 @@ class wrapped_fp(object):
         if cov_a is None:
             cov_a = self._apriori_covariance
 
-        res = self._L2run.solver.solve(x_i, x_a, cov_a)
+        res = self.L2Run.solver.solve(x_i, x_a, cov_a)
 
-        hatx = self._L2run.solver.x_solution.copy()
+        hatx = self.L2Run.solver.x_solution.copy()
 
         return res, hatx
 
@@ -388,15 +410,15 @@ class wrapped_fp(object):
         """
 
         if final_state is None:
-            if self._L2run.solver.x_solution.shape[0] > 0:
-                final_state = self._L2run.solver.x_solution.copy()
+            if self.L2Run.solver.x_solution.shape[0] > 0:
+                final_state = self.L2Run.solver.x_solution.copy()
             else:
                 final_state = np.zeros_like(self._state_first_guess)
                 final_state[:] = np.nan
 
         if final_uncert is None:
-            if self._L2run.solver.x_solution.shape[0] > 0:
-                final_uncert = self._L2run.solver.x_solution.copy()
+            if self.L2Run.solver.x_solution.shape[0] > 0:
+                final_uncert = self.L2Run.solver.x_solution.copy()
             else:
                 final_uncert = np.zeros_like(self._state_first_guess)
                 final_uncert[:] = np.nan
@@ -406,7 +428,7 @@ class wrapped_fp(object):
         # grid slightly?
         wavelength = []
         for b in range(3):
-            tmp = self._L2run.forward_model.spectral_grid.low_resolution_grid(b)
+            tmp = self.L2Run.forward_model.spectral_grid.low_resolution_grid(b)
             wavelength.append(tmp.wavelength())
         wavelength = np.concatenate(wavelength)
 
@@ -441,7 +463,7 @@ class wrapped_fp(object):
         dat['/SpectralParameters/modeled_radiance'] = modeled_rad
         dat['/SpectralParameters/sample_indexes'] = self.get_sample_indexes()
 
-        dat['/RetrievalResults/xco2'] = [self._L2run.xco2]
+        dat['/RetrievalResults/xco2'] = [self.L2Run.xco2]
 
         s = np.newaxis, Ellipsis
 
@@ -459,17 +481,25 @@ class wrapped_fp(object):
                     h.create_dataset(vname, data=dat[vname])
 
 
-    def close_obj(self):
+    def _close_L2Run(self):
         """
-        This attempts to "close" the object - I am not sure this really works - 
-        but this is how the l2_special_run.py tries to do it.
+        deletes the L2Run object. This is required to get the 
+        operational output file to be finalized and closed correctly.
         """
-        self._L2run = None
+
+        # put this in a try/finally block, just in case something odd happens 
+        # on the delete. This will make sure the attribute it set back to 
+        # None, so the now-missing or broken L2Run will correctly cause
+        # an exception later through _get_L2Run()
+        try:
+            del self._L2Run
+        finally:
+            self._L2Run = None
 
 
 class wrapped_fp_watercloud_reff(wrapped_fp):
     """
-    creates a wrapped full_physics.L2run object, but includes 
+    creates a wrapped full_physics.L2Run object, but includes 
     extra code to implement r_eff derivative. This is 
     automatically appended to the state dimension.
     """
@@ -522,7 +552,7 @@ class wrapped_fp_watercloud_reff(wrapped_fp):
         # as existed in the file, so read the value
         self._staticprops_reff = self._read_reff_from_static_file(
             scattering_property_file_dst)
-        self._L2run_reff = self._staticprops_reff
+        self._L2Run_reff = self._staticprops_reff
 
         # I think this needs to happen first?
         # _update_watercloud_props(reff_prior_mean)
@@ -560,11 +590,11 @@ class wrapped_fp_watercloud_reff(wrapped_fp):
         # of calcs related to the sample index, band slices, etc, 
         # that we do not need to redo.
         print(('** refreshing L2Run to reff = {0:9.5f} **'.format(self._reff)))
-        self._L2run = full_physics.L2Run(*self._arg_list, **self._kw_dict)
-        self._L2run.forward_model.setup_grid()
+        self._L2Run = full_physics.L2Run(*self._arg_list, **self._kw_dict)
+        self._L2Run.forward_model.setup_grid()
         # assumes we now have this reff (should be in synch, but this might 
         # be a potential trouble spot...)
-        self._L2run_reff = self._reff
+        self._L2Run_reff = self._reff
         # restore the state vector into L2Run. need to do this through super(),
         # for the part of the state vector used in L2Run.
         super(wrapped_fp_watercloud_reff, self).set_x(self._x[:-1])
@@ -574,7 +604,7 @@ class wrapped_fp_watercloud_reff(wrapped_fp):
         # 1) get water cloud properties by interpolation at reff
         # 2) store into l2_static file
         # 3) store in variable.
-        # 4?) could trigger L2run refresh, if reff is different than self._reff?
+        # 4?) could trigger L2Run refresh, if reff is different than self._reff?
         print(('** updating props to reff = {0:9.5f} **'.format(reff)))
         # this file name is awkwardly a copy/pasted name from the lua 
         # config file that we use (custom_config_watercloud_reff.lua)
@@ -620,7 +650,7 @@ class wrapped_fp_watercloud_reff(wrapped_fp):
     def _ensure_synched_reff(self):
         if self._staticprops_reff != self._reff:
             self._update_watercloud_props(self._reff)
-        if self._L2run_reff != self._reff:
+        if self._L2Run_reff != self._reff:
             self._refresh_L2Run()
 
     def forward_run(self, band='all'):
