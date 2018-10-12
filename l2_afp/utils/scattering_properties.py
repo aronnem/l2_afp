@@ -117,8 +117,12 @@ def write_aggregated_properties(out_file, prop_name_out, adat):
     adat: data dictionary containing property data. 
         see aggregate_data()
     """
+
     gpath = '/{0:s}/Properties'.format(prop_name_out)
     with h5py.File(out_file, 'w') as h:
+
+        # phase function is handled separately, so we can make a 
+        # compressed array (since this can be big)
         dset = h.create_dataset(
             name = gpath+"/phase_function_moment", 
             shape = adat["phase_function_moment"].shape,
@@ -126,25 +130,62 @@ def write_aggregated_properties(out_file, prop_name_out, adat):
             compression = "gzip",
             compression_opts = 1)
         dset[:] = adat["phase_function_moment"]
+
+        # loop over remaining vars
         for var in _expected_table_vars + ('r_eff',):
             vpath = gpath+'/'+var
             if var == "phase_function_moment":
+                # this was handled above
                 pass
-            elif var == "Source":
-                # have to convert the Source field from a dtype np.object, 
-                # to a dtype S (null-term) string array, as the latter is the 
-                # only one that h5py is able to write into HDF5.
-                # find the S# dtype for the Source strings; the number 
-                # here is the longest len() string in the Source array
-                dt = 'S'+str(max([len(s) for s in adat['Source'][0,:]]))
-                tmp_array = np.zeros(adat['Source'].shape, dtype=dt)
-                tmp_array[:] = adat['Source']
+            elif var in ("Source", "Phase Function Moment Convention"):
+                # the two string types need a special case handling, to 
+                # ensure they are ASCII strings that h5py can interpret.
+                # if we don't do this, they are unicode strings which are 
+                # currently unsupported.
+                tmp_array = np.array(adat[var], dtype='S')
                 h[vpath] = tmp_array
             else:
                 h[vpath] = adat[var]
 
 
-def aggregate_properties(mmfile_list, r_eff_list, out_file, prop_name_out):
+def _get_reff_from_miefile(miefile):
+    """
+    helper to read the r_eff direct from mie file header lines
+
+    Note, this isn't really used, it was just helping double check 
+    that the mie file is self-consistent. Normally we get Reff from 
+    the mie file data (see read_mie_mom_file)
+    """
+
+    all_lines = []
+    with open(miefile,'r') as f:
+        # just read 20, to prevent something weird like accidentially 
+        # loading a giant file
+        for n in range(20):
+            all_lines.append(f.readline())
+
+    area_line_index = -1
+    volume_line_index = -1
+
+    for k, line in enumerate(all_lines):
+        if line.startswith('# Average projected area per particle'):
+            area_line_index = k
+        if line.startswith('# Average volume per particle'):
+            volume_line_index = k
+
+    if area_line_index == -1 or volume_line_index == -1:
+        raise ValueError('Cannot find particle size info in mie file: '+
+                         miefile)
+
+    A = float(all_lines[area_line_index].split()[-1])
+    V = float(all_lines[volume_line_index].split()[-1])
+
+    r_eff = 0.75 * V / A
+
+    return r_eff
+
+
+def aggregate_properties(mmfile_list, out_file, prop_name_out):
     """
     aggregate a list of mie, mom files into a single dictionary, 
     to be inserted into h5 combined file. This runs read_mie_mom_file() 
@@ -177,6 +218,8 @@ def aggregate_properties(mmfile_list, r_eff_list, out_file, prop_name_out):
 
     mmdata = list(map(read_mie_mom_file, mmfile_list))
     nprops = len(mmfile_list)
+
+    r_eff_list = [dat['Reff'][0] for dat in mmdata]
 
     adat = {}
     source_list = [os.path.split(f)[1] for f in mmfile_list]
@@ -253,7 +296,12 @@ def aggregate_V8_properties(
             pdata = {}
             for var in _expected_table_vars:
                 vpath = gpath+'/'+var
-                pdata[var] = h.get(vpath)[:]
+                tmp_data = h.get(vpath)[:]
+                # special case the strings: convert to unicode to play nice
+                # in python3.
+                if var in ("Source", "Phase Function Moment Convention"):
+                    tmp_data = tmp_data.astype('U')
+                pdata[var] = tmp_data
             dat_list.append(pdata)
 
     # aggregate data, and double check that things are consistent.
@@ -363,12 +411,13 @@ def interpolate_by_reff(h5file, prop_name, reff):
         dat['wave_number'] = h[gpath+'/wave_number'][:]
     # note the two strings here need to be lists with 1 element, 
     # to match the layout in the h5 property file.
-    # I am not 100% sure this is right - needs double checking
-    dat['Phase Function Moment Convention'] = ["de Rooij"]
-    dat['Source'] = ['interp_r={0:5.2f}'.format(reff)]
+    dat['Phase Function Moment Convention'] = np.array(['de Rooij'])
+    dat['Source'] = np.array(['interp_r={0:5.2f}'.format(reff)])
+    
     # trims maybe unneeded zero from end of pf moment array
     max_nmom = np.max( (dat['phase_function_moment'] != 0).sum(1) )
     dat['phase_function_moment'] = dat['phase_function_moment'][:,:max_nmom,:]
+
     return dat
 
 
@@ -405,6 +454,10 @@ def write_variable_properties(h5file, prop_name, prop_data):
                     # and then remake a new variable.
                     del h[vpath]
                     h[vpath] = prop_data[var]
+                elif var in ("Source", "Phase Function Moment Convention"):
+                    # convert to S dtype (byte array)
+                    tmp_array = np.array(prop_data[var], dtype='S')
+                    h[vpath][:] = tmp_array
                 else:
                     h[vpath][:] = prop_data[var]
         else:
@@ -412,8 +465,13 @@ def write_variable_properties(h5file, prop_name, prop_data):
             for var in _expected_table_vars:
                 vpath = gpath+'/'+var
                 # getting error here for 'Phase Function Moment Convention'
-                # TypeError: Invalid index for scalar dataset (only ..., () allowed)
-                h[vpath] = prop_data[var]
+                # TypeError: Invalid index for scalar dataset 
+                # (only ..., () allowed)
+                if var in ("Source", "Phase Function Moment Convention"):
+                    tmp_array = np.array(prop_data[var], dtype='S')
+                    h[vpath] = tmp_array                    
+                else:
+                    h[vpath] = prop_data[var]
 
 
 def thin_aerosol_table(in_file, out_file):

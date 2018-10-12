@@ -9,6 +9,8 @@ from .utils import scattering_properties
 
 import numpy as np
 
+from builtins import str
+
 # these imports are for some file management done by the r_eff derivative 
 # variant. ideally, try to remove these, if we can find a cleaner method.
 import shutil, os.path
@@ -84,6 +86,7 @@ class wrapped_fp(object):
         # interface to the l2_fp application.
         self._L2Run = full_physics.L2Run(*arg_list, **kw_dict)
 
+        self._enable_console_log = enable_console_log
         if enable_console_log is False:
             self._L2Run.config.logger.turn_off_logger()
 
@@ -133,9 +136,12 @@ class wrapped_fp(object):
         self._sample_indexes = []
         # copy grid_obj to shorten syntax.
         grid_obj = self._L2Run.forward_model.spectral_grid
+        self.num_samples = 0
         for b in range(3):
-            self._sample_indexes.append( 
-                grid_obj.low_resolution_grid(b).sample_index.copy()-1 )
+            index_b = grid_obj.low_resolution_grid(b).sample_index.copy()-1
+            self.num_samples += index_b.shape[0]
+            self._sample_indexes.append(index_b)
+            
 
         output_objs = self._L2Run.config.output()
         self._L2Run_output = output_objs[0]
@@ -546,7 +552,9 @@ class wrapped_fp(object):
         # I think we can rely on numpy's dtype to do the encoding, 
         # instead of python's string.encode()
         svnames = self.get_state_variable_names()
-        svnames = np.array(svnames, dtype='S')
+        # not sure which is better. these might be identical.
+        #svnames = np.array(svnames, dtype='S')
+        svnames = np.array([n.encode('ascii') for n in svnames])
         dat['/RetrievedStateVector/state_vector_names'] = svnames
 
         sounding_id = np.zeros(1, dtype=np.int64)
@@ -597,7 +605,7 @@ class wrapped_fp(object):
             self._L2Run = None
 
 
-class wrapped_fp_watercloud_reff(wrapped_fp):
+class wrapped_fp_aerosol_reff(wrapped_fp):
     """
     creates a wrapped full_physics.L2Run object, but includes 
     extra code to implement r_eff derivative. This is 
@@ -605,61 +613,117 @@ class wrapped_fp_watercloud_reff(wrapped_fp):
     """
 
     @staticmethod
-    def _read_reff_from_static_file(hfile):
+    def _read_reff_from_static_file(hfile, grp_name):
         # note - assumes the 'Source' variable is a 1-element array of string
         with h5py.File(hfile,'r') as h:
-            sprop_name = h.get('/wc_variable/Properties/Source')[0]
-        reff = float(sprop_name.split('=')[-1])
+            if grp_name in h:
+                sprop_name = h.get(grp_name+'/Properties/Source')[0]
+                if not isinstance(sprop_name, str):
+                    sprop_name = sprop_name.decode()
+                reff = float(sprop_name.split('=')[-1])
+            else:
+                # Note To Self: fix this part,
+                # use negative one as a value to force a recalc - 
+                # this should happen if the properties have not been inserted 
+                # into file yet.
+                reff = -1.0
         return reff
 
+    @staticmethod
+    def _prepare_lua_config(infile, outfile, static_input_file,
+                            aerosol_variable_defs):
 
-    def __init__(self, wrkdir, scattering_property_file,
-                 L1bfile, ECMWFfile, 
-                 merradir, abscodir, wc_grid_file,
+        linefmt1 = 'config.static_aerosol_file = "{0:s}"' + os.linesep
+        linefmt2 = (
+            'config.fm.atmosphere.aerosol.{0:s}.property = '+
+            'ConfigCommon.hdf_aerosol_property("{1:s}")' + os.linesep )
+
+        with open(infile, 'r') as f:
+            config_lines = [line for line in f]
+
+        final_line = config_lines.index('config:do_config()'+os.linesep)
+
+        for vardef in aerosol_variable_defs:
+            config_lines.insert(
+                final_line, 
+                linefmt2.format(vardef['lua_name'], vardef['grp_name']))
+        config_lines.insert(final_line, linefmt1.format(static_input_file))
+
+        with open(outfile, 'w') as f:
+            f.writelines(config_lines)
+
+                
+    def __init__(self,
+                 base_aerosol_property_file,
+                 aerosol_variable_defs,
+                 L1bfile, ECMWFfile, config_file, 
+                 merradir, abscodir,
                  reff_prior_mean = 10.0, reff_prior_stdv = 4.0, 
-                 reff_increment = 0.05, **kwarg):
+                 reff_increment = 0.05, wrkdir = '.',  **kwarg):
         """
-        see wrapped_fp init, with the exception that this uses a 
-        particular config file.
+        see wrapped_fp init
+
+        aerosol_variable_defs:
+        svname: string name for the state variable name list.
+        lua_name: 'Water'  (must match name defined in Lua - can't 
+             easily get this automatically)
+        grp_name: 'wc_variable' name of group in l2_static_aerosol file.
+             arbitrary, code will write/create this group on the fly.
+        grid_grp_name: 'wc_grid' name of group in the property grid file
+        grid_filename: property grid file.
         """
 
-        # Here's the clunky/brittle part.
-        # Right now I have the Lua config pointed to a file named 
-        # "l2_aerosol_wc_variable.h5" with no path, so it needs to be 
-        # in the same directory as the lua file. So for now, 
-        # these will just be both copied into the wrk dir, and we are 
-        # not going to bother cleaning them up.
-        lua_config_src = get_lua_config_files()['watercloud_reff']
-        lua_config_dst = os.path.join(wrkdir, os.path.basename(lua_config_src))
-        scattering_property_file_src = scattering_property_file
-        scattering_property_file_dst = os.path.join(
-            wrkdir, "l2_aerosol_wc_variable.h5")
+        src_file = base_aerosol_property_file
+        dst_file = os.path.join(
+            wrkdir, os.path.split(base_aerosol_property_file)[1])
+        dst_file = dst_file.replace('.h5', '_variable.h5')
+        if os.access(dst_file, os.R_OK):
+            raise ValueError(
+                'Aborting, aerosol property file already exists in wrkdir:'
+                +dst_file)
 
-        # This not amenable to any sort of parallel jobs, unless the caller 
-        # sets the wrkdir independently to each job.
-        # this should just overwrite the contents, without erroring 
-        # (unless something changed the file to read only)
-        shutil.copyfile(lua_config_src, lua_config_dst)
-        shutil.copyfile(scattering_property_file_src, 
-                        scattering_property_file_dst)
+        shutil.copy(src_file, dst_file)
+        self._aerosol_property_file = dst_file
+        
+        src_file = config_file
+        dst_file = os.path.join(wrkdir, os.path.split(config_file)[1])
+        if os.access(dst_file, os.R_OK):
+            raise ValueError(
+                'Aborting, config file already exists in wrkdir:'+dst_file)
 
-        self._reff = reff_prior_mean
-        self._reff_var = reff_prior_stdv**2
+        self._prepare_lua_config(
+            src_file, dst_file, self._aerosol_property_file,
+            aerosol_variable_defs)
+        lua_config_file = dst_file
+
+        self._aerosol_vardefs = aerosol_variable_defs
+        self._n_aerosol_reff = len(aerosol_variable_defs)
+
+        self._reff = [reff_prior_mean] * self._n_aerosol_reff
+        self._reff_var = [reff_prior_stdv**2] * self._n_aerosol_reff
         self._reff_incr = reff_increment
-        self._wc_grid_file = wc_grid_file
-
+        
         # The L2Run object will initially be set to the same value 
         # as existed in the file, so read the value
-        self._staticprops_reff = self._read_reff_from_static_file(
-            scattering_property_file_dst)
-        self._L2Run_reff = self._staticprops_reff
+        self._staticprops_reff = []
+        initialize_props = False
+        for n in range(self._n_aerosol_reff):
+            vardef = self._aerosol_vardefs[n]
+            current_reff = self._read_reff_from_static_file(
+                self._aerosol_property_file, vardef['grp_name'])
+            if current_reff < 0:
+                initialize_props = True
+            self._staticprops_reff.append(current_reff)
+        if initialize_props:
+            self._update_aerosol_props(self._reff)
+        self._L2Run_reff = list(self._staticprops_reff)
 
         # I think this needs to happen first?
-        # _update_watercloud_props(reff_prior_mean)
+        # _update_aerosol_props(reff_prior_mean)
 
-        arg = (L1bfile, ECMWFfile, lua_config_dst, merradir, abscodir)
+        arg = (L1bfile, ECMWFfile, lua_config_file, merradir, abscodir)
 
-        super(wrapped_fp_watercloud_reff, self).__init__(*arg, **kwarg)
+        super(wrapped_fp_aerosol_reff, self).__init__(*arg, **kwarg)
 
         # most methods will fall to super class, as desired:
         # get_sample_indexes(), get_noise(), get_y(), get_Se_diag()
@@ -673,11 +737,12 @@ class wrapped_fp_watercloud_reff(wrapped_fp):
 
         # udpate the state and prior covars to inclue the 
         # prior mean and stdv.
+        reff_var_diag = np.zeros(self._n_aerosol_reff) + self._reff_var
         self._Sa_augmented = blk_diag(
-            [self._apriori_covariance, np.zeros((1,1))+self._reff_var])
+            [self._apriori_covariance, np.diag(reff_var_diag)])
 
         self._state_first_guess = np.concatenate(
-            [self._state_first_guess, [self._reff]])
+            [self._state_first_guess, self._reff])
         self._apriori_covariance = self._Sa_augmented.copy()
 
         # this also needs a copy stored separately, because it will need 
@@ -689,107 +754,117 @@ class wrapped_fp_watercloud_reff(wrapped_fp):
         # this shortcuts super.__init__(), because there are a lot 
         # of calcs related to the sample index, band slices, etc, 
         # that we do not need to redo.
-        print(('** refreshing L2Run to reff = {0:9.5f} **'.format(self._reff)))
+        print('** refreshing L2Run to reff = '+
+              '{0:s} **'.format(str(self._reff)))
         self._L2Run = full_physics.L2Run(*self._arg_list, **self._kw_dict)
         self._L2Run.forward_model.setup_grid()
         output_objs = self._L2Run.config.output()
         self._L2Run_output = output_objs[0]
         self._L2Run_error_output = output_objs[1]
+        if self._enable_console_log is False:
+            self._L2Run.config.logger.turn_off_logger()
         # assumes we now have this reff (should be in synch, but this might 
         # be a potential trouble spot...)
-        self._L2Run_reff = self._reff
+        self._L2Run_reff = list(self._reff)
         # restore the state vector into L2Run. need to do this through super(),
         # for the part of the state vector used in L2Run.
-        super(wrapped_fp_watercloud_reff, self).set_x(self._x[:-1])
+        x_no_reff = self._x[:-self._n_aerosol_reff]
+        super(wrapped_fp_aerosol_reff, self).set_x(x_no_reff)
         
         
-    def _update_watercloud_props(self, reff):
-        # 1) get water cloud properties by interpolation at reff
+    def _update_aerosol_props(self, reff):
+        # 1) get aerosol properties by interpolation at reff
         # 2) store into l2_static file
-        # 3) store in variable.
-        # 4?) could trigger L2Run refresh, if reff is different than self._reff?
-        print(('** updating props to reff = {0:9.5f} **'.format(reff)))
-        # this file name is awkwardly a copy/pasted name from the lua 
-        # config file that we use (custom_config_watercloud_reff.lua)
-        # and I think currently assumes this happens to be in the current dir.
-        static_l2_file = "l2_aerosol_wc_variable.h5"
-        # more awkward name
-        grid_prop_name = "L2_wc_recalc"
-        out_prop_name = "wc_variable"
 
-        pdata = scattering_properties.interpolate_by_reff(
-            self._wc_grid_file, grid_prop_name, reff)
-        scattering_properties.write_variable_properties(
-            static_l2_file, out_prop_name, pdata)
-        self._staticprops_reff = reff
+        for reff_i, vardef in zip(reff, self._aerosol_vardefs):
+            print('interpolating props to reff_i = {0:9.5f} for {1:s}'.format(
+                reff_i, vardef['svname']))
+            pdata = scattering_properties.interpolate_by_reff(
+                vardef['grid_filename'], vardef['grid_grp_name'], reff_i)
+            scattering_properties.write_variable_properties(
+                self._aerosol_property_file, vardef['grp_name'], pdata)
+        self._staticprops_reff = list(reff)
 
 
     def get_x(self):
-        x0 = super(wrapped_fp_watercloud_reff, self).get_x()
-        x0 = np.concatenate([x0, np.zeros(1)+self._reff])
+        x0 = super(wrapped_fp_aerosol_reff, self).get_x()
+        x0 = np.concatenate([x0, self._reff])
         return x0
 
     def set_x(self, x_new):
-        super(wrapped_fp_watercloud_reff, self).set_x(x_new[:-1])
-        self._reff = x_new[-1]
+        x_no_reff = self._x[:-self._n_aerosol_reff]
+        super(wrapped_fp_aerosol_reff, self).set_x(x_no_reff)
+        self._reff = list(x_new[-self._n_aerosol_reff:])
         self._x = x_new.copy()
 
     def get_Sa(self):
-        Sa = super(wrapped_fp_watercloud_reff, self).get_Sa()
-        Sa = blk_diag([Sa, np.zeros((1,1))+self._reff_var])
+        reff_var_diag = np.zeros(self._n_aerosol_reff) + self._reff_var
+        Sa = super(wrapped_fp_aerosol_reff, self).get_Sa()
+        Sa = blk_diag([Sa, np.diag(reff_var_diag)])
         return Sa
 
     def set_Sa(self, S_new):
-        super(wrapped_fp_watercloud_reff, self).set_Sa(S_new[:-1,:-1])
-        self._reff_var = S_new[-1,-1]
+        super(wrapped_fp_aerosol_reff, self).set_Sa(
+            S_new[:-self._n_aerosol_reff,:-self._n_aerosol_reff])
+        self._reff_var = list(np.diag(
+            S_new[-self._n_aerosol_reff:,-self._n_aerosol_reff:]))
         self._Sa_augmented = S_new.copy()
 
     def get_state_variable_names(self):
         svnames = \
-            super(wrapped_fp_watercloud_reff, self).get_state_variable_names()
-        svnames.append('Water_Reff')
+            super(wrapped_fp_aerosol_reff, self).get_state_variable_names()
+        svnames = list(svnames)
+        svnames += [v['svname'] for v in self._aerosol_vardefs]
         return svnames
 
     def _ensure_synched_reff(self):
         if self._staticprops_reff != self._reff:
-            self._update_watercloud_props(self._reff)
+            self._update_aerosol_props(self._reff)
         if self._L2Run_reff != self._reff:
             self._refresh_L2Run()
 
     def forward_run(self, band='all'):
         # if the reff has changed, need to refresh the static data and L2Run.
         self._ensure_synched_reff()
-        return super(wrapped_fp_watercloud_reff, self).forward_run(band=band)
+        return super(wrapped_fp_aerosol_reff, self).forward_run(band=band)
 
     
     def jacobian_run(self, band='all'):
         # if the reff has changed, need to refresh the static data and L2Run.
         self._ensure_synched_reff()
-        wl,I,K = super(wrapped_fp_watercloud_reff, self).jacobian_run(band=band)
+        wl,I,K = super(wrapped_fp_aerosol_reff, self).jacobian_run(band=band)
 
         K_reff = self._reff_derivative(band=band)
         K_aug = np.concatenate([K, K_reff], axis=1)
 
         return wl, I, K_aug
 
+
     def _reff_derivative(self, band='all'):
 
         # store base value, before we perturb it.
-        base_reff = self._reff
-        # perturbed values.
-        reff_d1 = base_reff * (1 - 0.5*self._reff_incr)
-        reff_d2 = base_reff * (1 + 0.5*self._reff_incr)
+        base_reff = list(self._reff)
 
-        self._reff = reff_d1
-        wl, I1 = self.forward_run(band=band)
-        self._reff = reff_d2
-        wl, I2 = self.forward_run(band=band)
+        # since the call can be 1 or all 3 bands, we don't know 
+        # the needed shape for dIdR until the end. hence the use of list()
+        dIdR_list = []
 
-        dIdR = (I2 - I1) / (self._reff_incr*base_reff)
-        dIdR = np.reshape(dIdR, (dIdR.shape[0],1))
+        for n in range(self._n_aerosol_reff):
+            # perturbed values.
+            reff_d1 = base_reff[n] * (1 - 0.5*self._reff_incr)
+            reff_d2 = base_reff[n] * (1 + 0.5*self._reff_incr)
 
-        # restore original value
-        self._reff = base_reff
+            self._reff[n] = reff_d1
+            wl, I1 = self.forward_run(band=band)
+            self._reff[n] = reff_d2
+            wl, I2 = self.forward_run(band=band)
+
+            dIdR_list.append( (I2 - I1) / (self._reff_incr*base_reff[n]) )
+
+            # restore original value
+            self._reff[n] = base_reff[n]
+
+        dIdR = np.array(dIdR_list).T
 
         return dIdR
 
