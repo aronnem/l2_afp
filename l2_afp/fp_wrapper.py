@@ -794,7 +794,7 @@ class wrapped_fp_aerosol_reff(wrapped_fp):
         return x0
 
     def set_x(self, x_new):
-        x_no_reff = self._x[:-self._n_aerosol_reff]
+        x_no_reff = x_new[:-self._n_aerosol_reff]
         super(wrapped_fp_aerosol_reff, self).set_x(x_no_reff)
         self._reff = list(x_new[-self._n_aerosol_reff:])
         self._x = x_new.copy()
