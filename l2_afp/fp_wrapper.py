@@ -87,7 +87,9 @@ class wrapped_fp(object):
         self._L2Run = full_physics.L2Run(*arg_list, **kw_dict)
 
         self._enable_console_log = enable_console_log
-        if enable_console_log is False:
+        # have to check for False or zero (the IDL bridge cannot make a 
+        # python boolean value, only 0/1.)
+        if enable_console_log in (False,0):
             self._L2Run.config.logger.turn_off_logger()
 
         # so - the grid may depend on the prior data (I think).
