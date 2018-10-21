@@ -114,6 +114,8 @@ def get_lua_config_files():
         _lua_config_dir, 'custom_config_fixed_aerosol.lua')
     lua_configs['watercloud_reff'] = os.path.join(
         _lua_config_dir, 'custom_config_watercloud_reff.lua')
+    lua_configs['watercloud_only'] = os.path.join(
+        _lua_config_dir, 'custom_config_watercloud_only.lua')
 
     return lua_configs
 
