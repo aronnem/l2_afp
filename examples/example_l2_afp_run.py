@@ -5,20 +5,21 @@ import numpy as np
 
 import l2_afp
 
-ddir = '/data/merrelli/OCO2_L2_workarea/sandbox_B8_pytest'
-L1bfile = os.path.join(ddir, 'oco2_L1bScTG_06280a_150906_B7000r_151030071317.h5')
-ECfile = os.path.join(ddir, 'oco2_ECMWFTG_06280a_150906_B7000_150906183644.h5')
-IDPfile = os.path.join(ddir, 'oco2_L2IDPTG_06280a_150906_B7000r_151030124259.h5')
-sounding_id = '2015090613050738'
+ddir = '/data/merrelli/l2_afp_sandbox'
+L1bfile = os.path.join(ddir, 'oco2_L1bScND_10246a_160604_B8000r_170630100507.h5')
+Metfile = os.path.join(ddir, 'oco2_L2MetND_10246a_160604_B8000r_170630042307.h5')
+IDPfile = os.path.join(ddir, 'oco2_L2IDPND_10246a_160604_B8100r_170721105543.h5')
+sounding_id = '2016060421174703'
 
 config_file = l2_afp.utils.get_lua_config_files()['default']
 merradir = '/data/OCO2/L2_datasets/merra_composite'
 abscodir = '/data/OCO2/absco'
 
 l2_obj = l2_afp.wrapped_fp(
-    L1bfile, ECfile, config_file, merradir, abscodir, 
+    L1bfile, Metfile, config_file, merradir, abscodir, 
     sounding_id = sounding_id, imap_file = IDPfile)
 
+# run the afp solver.
 Sa = l2_obj.get_Sa()
 Se_diag = l2_obj.get_Se_diag()
 Kupdate = l2_obj.Kupdate
@@ -44,7 +45,7 @@ x_unc_i = np.zeros_like(x_i)
 for n in range(S_i.shape[0]):
     x_unc_i[0,n,:] = np.sqrt(np.diag(S_i_list[n]))
 
-output_filename = 'l2afp_test_'+sounding_id+'.h5'
+output_filename = 'l2_afp_test_'+sounding_id+'.h5'
 l2_obj.write_h5_output_file(
     output_filename, final_state = x_i_list[-1], 
     final_uncert = np.sqrt(np.diag(S_i_list[-1])), 
