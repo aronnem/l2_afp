@@ -260,6 +260,70 @@ class wrapped_fp(object):
 
         return Se_diag
 
+    def get_altitude_levels(self):
+        """
+        returns altitude levels, in km
+        """
+
+        # note the input here is the (0-order) band number.
+        # I think this would account for small altitude differences
+        # between bands (due to topog.), which is currently unused (in B9)
+
+        obj = self.L2Run.atmosphere.altitude(0)
+        # value attributes to get the ndarray at the base, and then
+        # make a copy to be safe.
+        Zlevels = obj.value.value.copy()
+
+        return Zlevels
+
+    def get_gas_column_numdensity(self, gas_name):
+        """
+        get gas integrated column number density (number per m^-2)
+        the gas_name input is a string, one of "O2", "CO2", "H2O"
+        """
+        obj = self.L2Run.atmosphere.absorber.gas_total_column_thickness(gas_name)
+        return obj.value.value
+
+    def get_pressure_levels(self):
+        """
+        get the internal 20 pressure levels, in Pa
+        """
+        Plevel = self.L2Run.atmosphere.pressure_grid.copy()
+        return Plevel
+
+    def get_temperature_profile(self, pres_levels=None):
+        """
+        get temperature profile, on arbitrary pres_levels
+        if nothing is input, then it default to the internal 20 pressure 
+        levels (see get_pressure_levels()).
+        """
+        if pres_levels:
+            Plevels = np.asarray(pres_levels)
+        else:
+            Plevels = self.get_pressure_levels()
+        Tlevels = np.zeros_like(Plevels)
+        for k in range(Tlevels.shape[0]):
+            Tlevels[k] = self.L2Run.atmosphere.temperature_func(Plevels[k])
+
+        return Tlevels
+
+    def get_gas_vmr_profile(self, gas_name, pres_levels=None):
+        """
+        get gas VMR profile, on arbitrary pres_levels
+        if nothing is input, then it default to the internal 20 pressure 
+        levels (see get_pressure_levels()).
+        the gas_name input is a string, one of "O2", "CO2", "H2O"
+        """
+        if pres_levels:
+            Plevels = np.asarray(pres_levels)
+        else:
+            Plevels = self.get_pressure_levels()
+        Nlevels = np.zeros_like(Plevels)
+        for k in range(Plevels.shape[0]):
+            Nlevels[k] = self.L2Run.atmosphere.volume_mixing_ratio_func(
+                gas_name, full_physics.AutoDerivativeDouble(Plevels[k]))
+        
+        return Nlevels
 
     def set_x(self, x_new):
         """
