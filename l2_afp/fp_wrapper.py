@@ -82,6 +82,9 @@ class wrapped_fp(object):
         self._kw_dict = kw_dict
         self._sounding_id = sounding_id
 
+        # Reference wavenumber for aerosol optical depths (755 nm)
+        self._wn_ref = 1e7/755.0
+
         # create the full physics L2Run object. This is the main 
         # interface to the l2_fp application.
         self._L2Run = full_physics.L2Run(*arg_list, **kw_dict)
@@ -144,6 +147,29 @@ class wrapped_fp(object):
             self.num_samples += index_b.shape[0]
             self._sample_indexes.append(index_b)
             
+        # Determine how many aerosols are present in the setup.
+        # Since this is controlled by the Lua config, or potentially
+        # input file contents, we do not have an easy way to know.
+        # We can find out by checking two items: the number of apparent
+        # aerosol-related state vector variables, and the size of the 
+        # aerosol layer optical depth array.
+        #
+        # First: search the state variable names to attempt to extract
+        # the names of aerosols loaded into the L2Run.atmosphere, which should
+        # also match the internal ordering.
+        # Second, compare to layer array.
+        #
+        # the number of aerosol is important, for preventing seg fault
+        # in some of the aerosol property access methods.
+        self._aerosol_list = self._extract_aerosol_names(
+            self.get_state_variable_names())
+        self._num_aerosols = len(self._aerosol_list)
+        aerosol_layer_OD = self.get_aerosol_layer_OD('all')
+
+        # for now, throw exception: this could imply the seg fault 
+        # cannot be intercepted.
+        if self._num_aerosols != aerosol_layer_OD.shape[1]:
+            raise ValueError("Aerosol list does not match layer OD array")
 
         output_objs = self._L2Run.config.output()
         self._L2Run_output = output_objs[0]
@@ -182,6 +208,46 @@ class wrapped_fp(object):
 
     L2Run = property(_get_L2Run, None, None,
                      'Access full_physics.L2Run object')
+
+    def _get_aerosol_names(self):
+        return self._aerosol_list
+
+    aerosol_names = property(_get_aerosol_names, None, None,
+                             'Get list of aerosol names')
+
+    @classmethod
+    def _extract_aerosol_names(self, svnames):
+        """
+        extract list of L2_FP aerosol names from a list of state
+        variable names (returned from get_state_variable_names()).
+        The state variable names are intended to be of the 
+        form:
+        'Aerosol wc_012 Aerosol Ext for Press Lvl 20'
+        'Aerosol Shape DU Logarithmic Gaussian for Coefficient 1',
+        etc.
+        """
+
+        aerosol_names = []
+
+        for s in svnames:
+
+            new_name = None
+            # name format 1:
+            #'Aerosol Shape NN Logarithmic Gaussian for Coefficient 1',
+            if 'Logarithmic Gaussian for Coefficient' in s:
+                new_name = s.split()[2]
+
+            # name format 2:
+            #'Aerosol wc_012 Aerosol Ext for Press Lvl 20'
+            elif 'Aerosol Ext for Press Lvl' in s:
+                new_name = s.split()[1]
+
+            if new_name:
+                if new_name not in aerosol_names:
+                    aerosol_names.append(new_name)
+
+        return aerosol_names
+
 
     def get_sample_indexes(self, band='all'):
         """
@@ -324,6 +390,31 @@ class wrapped_fp(object):
                 gas_name, full_physics.AutoDerivativeDouble(Plevels[k]))
         
         return Nlevels
+
+    def get_aerosol_layer_OD(self, aerosol_name, wn=None):
+        """
+        get the layer OD for an aerosol.
+        set aerosol_name to "all" to get a 2D array (n_layer, n_aerosol)
+        containing all the OD values.
+        """
+
+        if wn is None:
+            wn = self._wn_ref
+        
+        if aerosol_name != 'all':
+            if aerosol_name not in self.aerosol_names:
+                raise ValueError('Aerosol '+str(aerosol_name)+' is not defined')
+
+        tmp = self.L2Run.atmosphere.aerosol.optical_depth_each_layer(wn).value
+
+        if aerosol_name == 'all':
+            OD_layer = tmp.copy()
+        else:
+            a = self.aerosol_names.index(aerosol_name)
+            OD_layer = tmp[:,a].copy()
+
+        return OD_layer
+
 
     def set_x(self, x_new):
         """
