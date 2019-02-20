@@ -396,6 +396,10 @@ class wrapped_fp(object):
         get the layer OD for an aerosol.
         set aerosol_name to "all" to get a 2D array (n_layer, n_aerosol)
         containing all the OD values.
+
+        this can return the layer OD at arbitrary other wavenumbers, using
+        the wn keyword. The default is to use the reference wavenumber
+        (13245 1/cm = 755 nm).
         """
 
         if wn is None:
@@ -414,6 +418,29 @@ class wrapped_fp(object):
             OD_layer = tmp[:,a].copy()
 
         return OD_layer
+
+    def get_aerosol_total_ref_OD(self, aerosol_name):
+        """
+        get the total AOD by aerosol name, at the reference wavenumber.
+        """
+
+        if aerosol_name != 'all':
+            if aerosol_name not in self.aerosol_names:
+                raise ValueError('Aerosol '+str(aerosol_name)+' is not defined')
+
+        if aerosol_name == 'all':
+            AOD = np.array([self.get_aerosol_total_ref_OD(a_name)
+                            for a_name in self.aerosol_names])
+        else:
+            a = self.aerosol_names.index(aerosol_name)
+            # this should not occur, since we get "a" from the aerosol
+            # names list, but double check this: if we request an out 
+            # of range value it will trigger a seg fault.
+            if a >= self._num_aerosols:
+                raise ValueError('Out of range aerosol index requested')
+            AOD = self.L2Run.atmosphere.aerosol.aerosol_optical_depth(a)
+            
+        return AOD
 
 
     def set_x(self, x_new):
