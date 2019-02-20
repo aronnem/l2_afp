@@ -82,6 +82,9 @@ class wrapped_fp(object):
         self._kw_dict = kw_dict
         self._sounding_id = sounding_id
 
+        # Reference wavenumber for aerosol optical depths (755 nm)
+        self._wn_ref = 1e7/755.0
+
         # create the full physics L2Run object. This is the main 
         # interface to the l2_fp application.
         self._L2Run = full_physics.L2Run(*arg_list, **kw_dict)
@@ -144,6 +147,29 @@ class wrapped_fp(object):
             self.num_samples += index_b.shape[0]
             self._sample_indexes.append(index_b)
             
+        # Determine how many aerosols are present in the setup.
+        # Since this is controlled by the Lua config, or potentially
+        # input file contents, we do not have an easy way to know.
+        # We can find out by checking two items: the number of apparent
+        # aerosol-related state vector variables, and the size of the 
+        # aerosol layer optical depth array.
+        #
+        # First: search the state variable names to attempt to extract
+        # the names of aerosols loaded into the L2Run.atmosphere, which should
+        # also match the internal ordering.
+        # Second, compare to layer array.
+        #
+        # the number of aerosol is important, for preventing seg fault
+        # in some of the aerosol property access methods.
+        self._aerosol_list = self._extract_aerosol_names(
+            self.get_state_variable_names())
+        self._num_aerosols = len(self._aerosol_list)
+        aerosol_layer_OD = self.get_aerosol_layer_OD('all')
+
+        # for now, throw exception: this could imply the seg fault 
+        # cannot be intercepted.
+        if self._num_aerosols != aerosol_layer_OD.shape[1]:
+            raise ValueError("Aerosol list does not match layer OD array")
 
         output_objs = self._L2Run.config.output()
         self._L2Run_output = output_objs[0]
@@ -182,6 +208,46 @@ class wrapped_fp(object):
 
     L2Run = property(_get_L2Run, None, None,
                      'Access full_physics.L2Run object')
+
+    def _get_aerosol_names(self):
+        return self._aerosol_list
+
+    aerosol_names = property(_get_aerosol_names, None, None,
+                             'Get list of aerosol names')
+
+    @classmethod
+    def _extract_aerosol_names(self, svnames):
+        """
+        extract list of L2_FP aerosol names from a list of state
+        variable names (returned from get_state_variable_names()).
+        The state variable names are intended to be of the 
+        form:
+        'Aerosol wc_012 Aerosol Ext for Press Lvl 20'
+        'Aerosol Shape DU Logarithmic Gaussian for Coefficient 1',
+        etc.
+        """
+
+        aerosol_names = []
+
+        for s in svnames:
+
+            new_name = None
+            # name format 1:
+            #'Aerosol Shape NN Logarithmic Gaussian for Coefficient 1',
+            if 'Logarithmic Gaussian for Coefficient' in s:
+                new_name = s.split()[2]
+
+            # name format 2:
+            #'Aerosol wc_012 Aerosol Ext for Press Lvl 20'
+            elif 'Aerosol Ext for Press Lvl' in s:
+                new_name = s.split()[1]
+
+            if new_name:
+                if new_name not in aerosol_names:
+                    aerosol_names.append(new_name)
+
+        return aerosol_names
+
 
     def get_sample_indexes(self, band='all'):
         """
@@ -259,6 +325,122 @@ class wrapped_fp(object):
         Se_diag = noise ** 2
 
         return Se_diag
+
+    def get_altitude_levels(self):
+        """
+        returns altitude levels, in km
+        """
+
+        # note the input here is the (0-order) band number.
+        # I think this would account for small altitude differences
+        # between bands (due to topog.), which is currently unused (in B9)
+
+        obj = self.L2Run.atmosphere.altitude(0)
+        # value attributes to get the ndarray at the base, and then
+        # make a copy to be safe.
+        Zlevels = obj.value.value.copy()
+
+        return Zlevels
+
+    def get_gas_column_numdensity(self, gas_name):
+        """
+        get gas integrated column number density (number per m^-2)
+        the gas_name input is a string, one of "O2", "CO2", "H2O"
+        """
+        obj = self.L2Run.atmosphere.absorber.gas_total_column_thickness(gas_name)
+        return obj.value.value
+
+    def get_pressure_levels(self):
+        """
+        get the internal 20 pressure levels, in Pa
+        """
+        Plevel = self.L2Run.atmosphere.pressure_grid.copy()
+        return Plevel
+
+    def get_temperature_profile(self, pres_levels=None):
+        """
+        get temperature profile, on arbitrary pres_levels
+        if nothing is input, then it default to the internal 20 pressure 
+        levels (see get_pressure_levels()).
+        """
+        if pres_levels:
+            Plevels = np.asarray(pres_levels)
+        else:
+            Plevels = self.get_pressure_levels()
+        Tlevels = np.zeros_like(Plevels)
+        for k in range(Tlevels.shape[0]):
+            Tlevels[k] = self.L2Run.atmosphere.temperature_func(Plevels[k])
+
+        return Tlevels
+
+    def get_gas_vmr_profile(self, gas_name, pres_levels=None):
+        """
+        get gas VMR profile, on arbitrary pres_levels
+        if nothing is input, then it default to the internal 20 pressure 
+        levels (see get_pressure_levels()).
+        the gas_name input is a string, one of "O2", "CO2", "H2O"
+        """
+        if pres_levels:
+            Plevels = np.asarray(pres_levels)
+        else:
+            Plevels = self.get_pressure_levels()
+        Nlevels = np.zeros_like(Plevels)
+        for k in range(Plevels.shape[0]):
+            Nlevels[k] = self.L2Run.atmosphere.volume_mixing_ratio_func(
+                gas_name, full_physics.AutoDerivativeDouble(Plevels[k]))
+        
+        return Nlevels
+
+    def get_aerosol_layer_OD(self, aerosol_name, wn=None):
+        """
+        get the layer OD for an aerosol.
+        set aerosol_name to "all" to get a 2D array (n_layer, n_aerosol)
+        containing all the OD values.
+
+        this can return the layer OD at arbitrary other wavenumbers, using
+        the wn keyword. The default is to use the reference wavenumber
+        (13245 1/cm = 755 nm).
+        """
+
+        if wn is None:
+            wn = self._wn_ref
+        
+        if aerosol_name != 'all':
+            if aerosol_name not in self.aerosol_names:
+                raise ValueError('Aerosol '+str(aerosol_name)+' is not defined')
+
+        tmp = self.L2Run.atmosphere.aerosol.optical_depth_each_layer(wn).value
+
+        if aerosol_name == 'all':
+            OD_layer = tmp.copy()
+        else:
+            a = self.aerosol_names.index(aerosol_name)
+            OD_layer = tmp[:,a].copy()
+
+        return OD_layer
+
+    def get_aerosol_total_ref_OD(self, aerosol_name):
+        """
+        get the total AOD by aerosol name, at the reference wavenumber.
+        """
+
+        if aerosol_name != 'all':
+            if aerosol_name not in self.aerosol_names:
+                raise ValueError('Aerosol '+str(aerosol_name)+' is not defined')
+
+        if aerosol_name == 'all':
+            AOD = np.array([self.get_aerosol_total_ref_OD(a_name)
+                            for a_name in self.aerosol_names])
+        else:
+            a = self.aerosol_names.index(aerosol_name)
+            # this should not occur, since we get "a" from the aerosol
+            # names list, but double check this: if we request an out 
+            # of range value it will trigger a seg fault.
+            if a >= self._num_aerosols:
+                raise ValueError('Out of range aerosol index requested')
+            AOD = self.L2Run.atmosphere.aerosol.aerosol_optical_depth(a)
+            
+        return AOD
 
 
     def set_x(self, x_new):
