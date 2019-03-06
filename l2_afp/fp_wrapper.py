@@ -3,9 +3,11 @@
 import full_physics_swig
 import full_physics
 import h5py
+import tables
 
 from .utils import blk_diag, output_translation, get_lua_config_files
 from .utils import scattering_properties
+from .utils import leveling_calcs
 
 import numpy as np
 
@@ -1056,3 +1058,282 @@ class wrapped_fp_aerosol_reff(wrapped_fp):
     def write_h5_output_file_test(self):
         # I think this needs update, because the state has changed
         raise NotImplementedError()
+
+
+def wrapped_fp_3param_aerosol(wrapped_fp_aerosol_reff):
+    """
+    prototype of a wrapped full_physics.L2Run object, with included
+    derivatives for particle r_eff, layer center pressure, layer pressure
+    thickness.
+
+    this prototype subclasses wrapped_fp_aerosol_reff
+    to get the particle r_eff.
+    as a prototype, we are limited to a layer: can be any water or ice
+    cloud or any aerosol.
+
+    """
+
+    @staticmethod
+    def _write_static_covariances(static_file, plevels):
+
+        # hard code a 50 hPa correlation scale length
+        corr_scale = 50.0
+        # co2 std dev = 20 ppm, T std dev = 5 K.
+        CO2_variance = (20.e-6)**2
+        T_variance = 5.0
+
+        C_CO2, R_CO2 = leveling_calcs.plevel_correlation_matrix(
+            plevels, corr_scale, CO2_variance)
+        C_T, R_T = leveling_calcs.plevel_correlation_matrix(
+            plevels, corr_scale, T_variance)
+
+        with tables.open_file(static_file, 'a') as h:
+            h.remove_node('/Gas/CO2', 'covariance')
+            h.create_array('/Gas/CO2', 'covariance', C_CO2)
+            h.remove_node('/Temperature/Levels', 'covariance')
+            h.create_array('/Temperature/Levels', 'covariance', C_T)
+
+    @staticmethod
+    def _write_pressurelevels(input_file, frame_number, footprint,
+                              plevels):
+
+        nlevel_new = plevels.shape[0]
+        with tables.open_file(input_file, 'a') as h:
+            current_shape = h.get_node('/Pressure/PressureLevels').shape
+            nframe, nfp, nlevel = current_shape
+            required_shape = nframe, nfp, nlevel_new
+            if (frame_number < 0) or (frame_number >= nframe):
+                raise ValueError('Frame number out of range')
+            if nlevel != nlevel_new:
+                h.remove_node('/Pressure', 'PressureLevels')
+                h.create_array('/Pressure', 'PressureLevels', 
+                               np.zeros(required_shape))
+            d = h.get_node('/Pressure/PressureLevels')
+            d[frame_number, footprint, :] = plevels
+
+
+    @staticmethod
+    def _inplace_prepare_lua_config(config_file, static_file):
+        """
+        hacky method to deal with the two mods to config file.
+        this is an inplace-write, and since we need to actually
+        *insert* the new line before the end, that means I
+        need to read in the whole file, insert the line in a list,
+        then rewrite the whole file.
+        """
+
+        with open(config_file, 'r') as f:
+            config_lines = [line for line in f]
+
+        existing_static_line_pos = -1
+
+        for n,line in config_lines:
+            if line.startswith('config.static_file'):
+                existing_static_line_pos = n
+        if existing_static_line_pos != -1:
+            del config_lines[existing_static_line_pos]
+
+        new_line = "config.static_file="+static_file+os.linesep
+        for n,line in config_lines:
+            if line.endswith(':new()'):
+                config_lines.insert(n+1, new_line)
+                break
+
+        with open(config_file, 'w') as f:
+            f.writelines(config_lines)
+
+
+    def __init__(self,
+                 base_static_file,
+                 base_aerosol_property_file,
+                 aerosol_variable_defs,
+                 base_input_file, config_file, 
+                 merradir, abscodir, 
+                 num_interior_level = 3,
+                 CCP_prior = 850.0, CCP_stdv = 50.0,
+                 CT_prior = 50.0, CT_stdv = 10.0,
+                 CCP_incr = 1.0, CT_incr = 1.0,
+                 **kwarg):
+
+        # don't pass everything through args to the superclass init,
+        # (even though this is the same list)
+        # because I want to check a few inputs. This prototype is not
+        # flexible enough to deal with multi-layer classes that
+        # the superclass can handle.
+
+        if len(aerosol_variable_defs) > 1:
+            raise ValueError('3param aerosol class only supports single layer')
+
+        self._CCP = CCP_prior
+        self._CCP_var = CCP_stdv**2
+        self._CT = CT_prior
+        self._CT_var = CT_stdv**2
+
+        self._CCP_incr = CCP_incr
+        self._CT_incr = CT_incr
+
+        wrkdir = kwarg.get('wrkdir', '.')
+
+        src_file = base_static_file
+        dst_file = os.path.join(
+            wrkdir, os.path.split(base_static_file)[1])
+        dst_file = dst_file.replace('.h5', '_variable.h5')
+        if os.access(dst_file, os.R_OK):
+            raise ValueError(
+                'Aborting, static property file already exists in wrkdir:'
+                +dst_file)
+        self._static_file = dst_file
+
+        src_file = base_input_file
+        dst_file = os.path.join(
+            wrkdir, os.path.split(base_input_file)[1])
+        dst_file = dst_file.replace('.h5', '_variable.h5')
+        if os.access(dst_file, os.R_OK):
+            raise ValueError(
+                'Aborting, input file already exists in wrkdir:'
+                +dst_file)
+        self._input_file = dst_file
+
+        frame_number, fp = get_framefp_from_sounding_id(
+            L1bfile, self._sounding_id)
+        self._frame_number = frame_number
+        self._footprint = fp
+
+        plevr = leveling_calcs.pleveler(clear_plevels, cloud_plevels, npad)
+        self._plevr = plevr
+        # TBD: can we get by with never actually updating this?
+        # I suppose it depends on the amount of change in the P values?
+        self._write_static_covariances(
+            self._static_file, plevr.get_plevels())
+
+        # this is an awkward & trouble spot.
+        # input config file needs to be altered (to change the static file),
+        # but then the superclass will also alter (to add r_eff capability)
+        #
+        # so we have two steps that want to copy config file from input path,
+        # into work dir, and then modify file.
+        #
+        # hacky way around this is to modify this one in-place:
+        # this is not optimal since that would possibly
+        # change "master" lua files.
+        self._inplace_prepare_lua_config(config_file, self._static_file)
+
+        arg = (base_aerosol_property_file, aerosol_variable_defs,
+               self._input_file, self._input_file, 
+               merradir, abscodir)
+        super(wrapped_fp_3param_aerosol, self).__init__(*arg, **kwarg)
+
+        # for now, just prototype things with fixed pressure levels.
+        CTP_prior = CCP_prior - 0.5*CT_prior
+        CBP_prior = CCP_prior + 0.5*CT_prior
+        cloud_plevels = np.linspace(CTP_prior, CBP_prior, num_interior_level+2)
+        clear_levels = np.linspace(0, 1050, 20)
+        clear_levels[0] = 1
+        
+        self._update_Ai1_file()
+
+
+    def _update_Ai1_file(self):
+        # open and update the Aerosol Ext coef profile (eventually)
+        print('still need to include update to ext coef')
+        # and pressure levels for the current sounding id.
+        # this requires knowing the frame number and footprint.
+        new_plevels = self._plevr.get_plevels()
+        self._write_pressurelevels(
+            self._input_file, self._frame_number, self._footprint,
+            new_plevels)
+
+        # store the levels we loaded - then this can be checked 
+        # later to see if the file is synched.
+        self._Ai1_file_Plevels = new_plevels
+        
+    
+    def _ensure_synched_CP(self):
+        if np.any(self._Ai1_file_Plevels != self._plevr.get_plevels()):
+            # for now, only updating the levels in the input file,
+            # but NOT updating the static file (the covariances)
+            self._update_Ai1_file()
+
+    def get_x(self):
+        x0 = super(wrapped_fp_3param_aerosol, self).get_x()
+        x0 = np.concatenate([x0, self._CCP, self._CT])
+        return x0
+
+    def set_x(self, x_new):
+        new_CCP = x_new[-2]
+        new_CT = x_new[-1]
+        delta_CCP = new_CCP - self._CCP
+        delta_CT = new_CT - self._CT
+        print('this needs to be combined into one call!')
+        # otherwise it can get out of sync if the second one errors
+        # but the first does not.
+        self._plevr.update_CCP(delta_CCP)
+        self._plevr.update_CT(delta_CT)
+
+        x_no_CP = x_new[:-2]
+        super(wrapped_fp_3param_aerosol, self).set_x(x_no_CP)
+        self._CCP = x_new[-2]
+        self._CT = x_new[-1]
+
+        self._x = x_new.copy()
+
+    def get_Sa(self):
+        Sa = super(wrapped_fp_3param_aerosol, self).get_Sa()
+        Sa = blk_diag([Sa, np.diag([self._CCP_var, self._CT_var])])
+        return Sa
+
+    def set_Sa(self, S_new):
+        super(wrapped_fp_3param_aerosol, self).set_Sa(S_new[:-2,:-2])
+        self._CCP_var = S_new[-2,-2]
+        self._CT_var = S_new[-1,-1]
+        self._Sa_augmented = S_new.copy()
+
+    def get_state_variable_names(self):
+        svnames = \
+            super(wrapped_fp_3param_aerosol, self).get_state_variable_names()
+        svnames = list(svnames)
+        svnames += [self._aname + ' ' + v for v in ['CCP', 'CT']]
+        return svnames
+
+    def forward_run(self, band='all'):
+        # if any CP has changed, need to refresh the input data and L2Run
+        self._ensure_synched_CP()
+        return super(wrapped_fp_3param_aerosol, self).forward_run(band=band)
+    
+    def jacobian_run(self, band='all'):
+        # if any CP has changed, need to refresh the input data and L2Run
+        self._ensure_synched_CP()
+        wl,I,K = super(wrapped_fp_3param_aerosol, self).jacobian_run(band=band)
+
+        K_CCP = self._CCP_derivative(band=band)
+        K_CT = self._CT_derivative(band=band)
+        K_aug = np.concatenate([K, K_CCP, K_CT], axis=1)
+
+        return wl, I, K_aug
+
+
+    def _CCP_derivative(self, band='all'):
+
+        self._plevr.update_CCP(-0.5*self._CCP_incr)
+        wl, I1 = self.forward_run(band=band)
+        self._plevr.update_CCP( 1.0*self._CCP_incr)
+        wl, I2 = self.forward_run(band=band)
+        self._plevr.update_CCP(-0.5*self._CCP_incr)
+    
+        dIdCCP = (I2 - I2) / self._CCP_incr
+        
+        return dIdCCP
+
+
+    def _CT_derivative(self, band='all'):
+
+        self._plevr.update_CT(-0.5*self._CT_incr)
+        wl, I1 = self.forward_run(band=band)
+        self._plevr.update_CT( 1.0*self._CT_incr)
+        wl, I2 = self.forward_run(band=band)
+        self._plevr.update_CT(-0.5*self._CT_incr)
+    
+        dIdCT = (I2 - I2) / self._CT_incr
+
+        return dIdCT
+
