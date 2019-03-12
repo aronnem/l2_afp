@@ -266,7 +266,12 @@ class wrapped_fp(object):
             sample_indexes = [self.get_sample_indexes(b) for b in range(1,4)]
             sample_index = np.concatenate(sample_indexes)
         else:
-            b = band-1
+            # from the IDL bridge, band will arrive as a specific np
+            # integer datatype (int16, int32, etc.), while the L2Run methods
+            # appear to expect a python int object (which is a little different.)
+            # so, here we need to cast to integer.
+            # this casting will appear in many other places.
+            b = int(band-1)
             sample_index = self._sample_indexes[b].copy()
         return sample_index
 
@@ -284,7 +289,7 @@ class wrapped_fp(object):
             noise_per_band = [self.get_noise(b) for b in range(1,4)]
             noise = np.concatenate(noise_per_band)
         else:
-            b = band-1
+            b = int(band-1)
             radiance_all = self.L2Run.level_1b.radiance(b).data.copy()
             noise_all = self.L2Run.level_1b.noise_model.uncertainty(
                 b, radiance_all)
@@ -307,7 +312,7 @@ class wrapped_fp(object):
             y_per_band = [self.get_y(b) for b in range(1,4)]
             y = np.concatenate(y_per_band)
         else:
-            b = band-1
+            b = int(band-1)
             radiance_all = self.L2Run.level_1b.radiance(b).data.copy()
             y = radiance_all[self._sample_indexes[b]]
         return y
@@ -325,6 +330,65 @@ class wrapped_fp(object):
         Se_diag = noise ** 2
 
         return Se_diag
+
+
+    def get_solar_distance(self, AU=True):
+        """
+        convenience function to get the solar distance; by default this
+        is returned in AU; set keyword AU to false to get the distance
+        in meters.
+        1 AU = 149597870700.0 m
+
+        Note this should also be contained in the L1b file in 
+        SoundingGeometry/sounding_solar_distance
+        """
+        solar_dist = self.L2Run.forward_model.level_1b.solar_distance.value
+        if AU:
+            m_per_AU = 149597870700.0
+            solar_dist /= m_per_AU
+        return solar_dist
+
+    def get_stokes_coefficients(self, band='all'):
+        """
+        get stokes coefficients, returns a (4,) element array (for a single
+        band) or a (4,3) element array (for band = 'all', the default)
+        """
+        if band == 'all':
+            coef_list = [self.get_stokes_coefficients(b) for b in range(1,4)]
+            coefs = np.vstack(coef_list).T
+        else:
+            b = band - 1
+            coefs = self.L2Run.forward_model.level_1b.stokes_coefficient(b).copy()
+        return coefs
+
+    def get_geometry(self, band='all'):
+        """
+        convenience function to get the viewing geometry.
+        returns:
+
+        solar_azimuth, solar_zenith, view_azimuth, view_zenith, rel_azimuth,
+        altitude (in meters) in a python dictionary.
+
+        if band="all" then each is a 3-element array.
+        """
+
+        geom = {}
+        if band == 'all':
+            geom_list = [self.get_geometry(b) for b in range(1,4)]
+            for v in geom_list[0]:
+                geom[v] = np.array([g[v] for g in geom_list])
+        else:
+            b = band - 1
+            tmp = self.L2Run.forward_model.level_1b
+            geom['solar_azimuth'] = tmp.solar_azimuth(b).value
+            geom['solar_zenith'] = tmp.solar_zenith(b).value
+            geom['view_azimuth'] = tmp.sounding_azimuth(b).value
+            geom['view_zenith'] = tmp.sounding_zenith(b).value
+            geom['rel_azimuth'] = tmp.relative_azimuth(b).value
+            geom['altitude'] = tmp.altitude(b).value
+
+        return geom
+        
 
     def get_altitude_levels(self):
         """
@@ -348,7 +412,18 @@ class wrapped_fp(object):
         the gas_name input is a string, one of "O2", "CO2", "H2O"
         """
         obj = self.L2Run.atmosphere.absorber.gas_total_column_thickness(gas_name)
-        return obj.value.value
+        column_numdens = obj.value.value.copy()
+        return column_numdens
+
+    def get_gas_profile_numdensity(self, gas_name):
+        """
+        get gas integrated profile number density (number per m^-2, in
+        each layer)
+        the gas_name input is a string, one of "O2", "CO2", "H2O"
+        """
+        obj = self.L2Run.atmosphere.absorber.gas_column_thickness_layer(gas_name)
+        profile_dens = obj.value.value.copy()
+        return profile_numdens
 
     def get_pressure_levels(self):
         """
@@ -418,6 +493,7 @@ class wrapped_fp(object):
             OD_layer = tmp[:,a].copy()
 
         return OD_layer
+
 
     def get_aerosol_total_ref_OD(self, aerosol_name):
         """
@@ -510,6 +586,40 @@ class wrapped_fp(object):
         return self.L2Run.state_vector.state_covariance.copy()
 
 
+    def forward_run_highres(self, band='all'):
+        """
+        do a forward run of only the (sparse) high spectral resolution,
+        monochromatic reflectance.
+        this quantity should have the stokes coefficients applied, but
+        the solar spectrum is not multiplied, nor is the ILS convolved.
+        The resulting spectrum is on a sparse, high spectral
+        resolution grid.
+        """
+        if band == 'all':
+
+            result_list = [self.reflectance_run(band) for band in (1,2,3)]
+
+            wl = np.concatenate([r[0] for r in result_list])
+            R = np.concatenate([r[1] for r in result_list])
+
+        else:
+            b = int(band-1)
+            # do a bunch of L2Run internal data passing - not 100%
+            # why we need to do this, but that's what the function wants
+            # as inputs...
+            ils_hw = self.L2Run.instrument.ils_half_width(b)
+            spec_pix = self.L2Run.instrument.pixel_spectral_domain(b)
+            spec_samp = self.L2Run.spectrum_sampling.spectral_domain(
+                b, spec_pix, ils_hw)
+            # True to skip jacobian calculation (I think), and save time
+            fm_result = self.L2Run.radiative_transfer.reflectance(
+                spec_samp, 0, True)
+            wl = fm_result.wavelength.copy()
+            R = fm_result.value.copy()
+
+        return wl, R
+        
+
     def forward_run(self, band='all'):
         """
         do a forward run, for one band (1,2,3), or all bands (band='all'), 
@@ -526,7 +636,7 @@ class wrapped_fp(object):
         if band == 'all':
             fm_result = self.L2Run.forward_model.radiance_all(True)
         else:
-            b = band-1
+            b = int(band-1)
             fm_result = self.L2Run.forward_model.radiance(b,True)
         wl = fm_result.wavelength.copy()
         I = fm_result.value.copy()
@@ -551,7 +661,7 @@ class wrapped_fp(object):
         if band == 'all':
             fm_result = self.L2Run.forward_model.radiance_all(False)
         else:
-            b = band-1
+            b = int(band-1)
             fm_result = self.L2Run.forward_model.radiance(b,False)
         wl = fm_result.wavelength.copy()
         I = fm_result.value.copy()
