@@ -4,9 +4,9 @@ require "oco_base_config"
 
 config = OcoBaseConfig:new()
 
-config.fm.atmosphere.absorber.O2.absco = "v5.0.0/o2_v151005_cia_mlawer_v151005r1_narrow.hdf"
-config.fm.atmosphere.absorber.CO2.absco = "v5.0.0/co2_devi2015_wco2scale=nist_sco2scale=unity.hdf"
-config.fm.atmosphere.absorber.H2O.absco = "v5.0.0/h2o_hitran12.hdf"
+config.fm.atmosphere.absorber.O2.absco = "v5.0.0/o2_v151005_cia_mlawer_v151005r1_narrow.h5"
+config.fm.atmosphere.absorber.CO2.absco = "v5.0.0/co2_devi2015_wco2scale-nist_sco2scale-unity.h5"
+config.fm.atmosphere.absorber.H2O.absco = "v5.0.0/h2o_hitran12.h5"
 
 -- turn on per-iteration output
 config.iteration_output = true
