@@ -48,15 +48,33 @@ def get_framefp_from_sounding_id(L1bfile, sounding_id):
 class wrapped_fp(object):
     """
     create a wrapped full_physics.L2Run object. Contains convenience 
-    methods to make this easier to run with retrieval.py
+    methods to make this easier to run with l2_afp_retrieval.py, or with
+    any other python code.
 
     In general, throughout the class code, when we extract data out of 
-    the full_physics.L2Run object, 
+    the full_physics.L2Run object.
+
+    Note, this will work for B8 or B10+ variations of the L2FP code.
+    For B10+, the co2_pr_file must be specified via keyword. For B8,
+    this keyword is ignored.
     """
 
-    def __init__(self, L1bfile, ECMWFfile, 
+    # for reference, the init method for L2Run has the inputs in this order:
+    #def __init__(self, lua_config, sounding_id, met_file, spectrum_file, 
+    #             print_log = True,
+    #             scene_file = None,
+    #             co2_pr_file = None,  # Only for B10 or later
+    #             abscodir = None,
+    #             merradir = None,
+    #             imap_file = None):
+
+    def __init__(self,
+                 L1bfile,
+                 Metfile, 
                  config_file, 
-                 merradir, abscodir,
+                 merradir,
+                 abscodir,
+                 co2_pr_file = None,
                  imap_file = None, 
                  sounding_id = None, 
                  frame_number = None, 
@@ -73,9 +91,12 @@ class wrapped_fp(object):
                 L1bfile, frame_number, footprint)
 
         arg_list = (config_file, sounding_id, 
-                    ECMWFfile, L1bfile, )
+                    Metfile, L1bfile, )
+        
         kw_dict = dict(merradir=merradir, abscodir=abscodir, 
                        imap_file=imap_file)
+        if co2_pr_file:
+            kw_dict['co2_pr_file'] = co2_pr_file
 
         # store the input args and kw - mostly as a debug tool later.
         self._arg_list = arg_list
