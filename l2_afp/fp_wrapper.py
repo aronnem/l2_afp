@@ -11,6 +11,8 @@ import numpy as np
 
 from builtins import str
 
+import os
+
 # these imports are for some file management done by the r_eff derivative 
 # variant. ideally, try to remove these, if we can find a cleaner method.
 import shutil, os.path
@@ -105,6 +107,23 @@ class wrapped_fp(object):
 
         # Reference wavenumber for aerosol optical depths (755 nm)
         self._wn_ref = 1e7/755.0
+
+        # the python implementation of L2Run actually uses environment
+        # variables to send in most of the input variables into the C++
+        # code. Since the environment variables are preserved separated,
+        # this means that successive creations of an L2Run object can re-use
+        # input values from the previous run, since the env vars from the
+        # previous run might still be there. So, at this stage, we delete
+        # all the environment variables first to ensure this L2Run gets a
+        # clean copy.
+        # list of env vars can be found in full_physics/l2_run.py, L2Run
+        # class definition and __init__ method (lines 28-40)
+        key_list = ['met_file', 'spectrum_file', 'sounding_id', 
+                    'co2_pr_file', 'scene_file', 'imap_file',
+                    'abscodir', 'merradir']
+        for key in key_list:
+            if key in os.environ:
+                del os.environ[key]
 
         # create the full physics L2Run object. This is the main 
         # interface to the l2_fp application.
