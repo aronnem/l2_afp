@@ -13,6 +13,6 @@ merradir = '/data/OCO2/L2_datasets/merra_composite'
 abscodir = '/data/OCO2/absco'
 
 l2_obj = l2_afp.wrapped_fp(
-    L1bfile, Metfile, config_file, merradir, abscodir, 
-    sounding_id = sounding_id, imap_file = IDPfile,
+    L1bfile, Metfile, config_file, abscodir, 
+    merradir = merradir, sounding_id = sounding_id, imap_file = IDPfile,
     enable_console_log=False)
