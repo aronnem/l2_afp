@@ -118,6 +118,8 @@ def get_lua_config_files():
         _lua_config_dir, 'custom_config_watercloud_only.lua')
     lua_configs['unit_solar'] = os.path.join(
         _lua_config_dir, 'custom_config_unit_solar.lua')
+    lua_configs['operational'] = os.path.join(
+        _lua_config_dir, 'op_config.lua')
 
     return lua_configs
 

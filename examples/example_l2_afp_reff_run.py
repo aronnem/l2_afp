@@ -31,8 +31,8 @@ config_file = l2_afp.utils.get_lua_config_files()['watercloud_only']
 
 l2_obj = l2_afp.wrapped_fp_aerosol_reff(
     base_sprop_file, vardefs,
-    L1bfile, Metfile, config_file, merradir, abscodir,
-    sounding_id = sounding_id, imap_file = IDPfile, wrkdir=wrkdir)
+    L1bfile, Metfile, config_file, abscodir,
+    merradir = merradir, sounding_id = sounding_id, imap_file = IDPfile, wrkdir=wrkdir)
 
 Sa = l2_obj.get_Sa()
 Se_diag = l2_obj.get_Se_diag()

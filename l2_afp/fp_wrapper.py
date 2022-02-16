@@ -11,6 +11,8 @@ import numpy as np
 
 from builtins import str
 
+import os
+
 # these imports are for some file management done by the r_eff derivative 
 # variant. ideally, try to remove these, if we can find a cleaner method.
 import shutil, os.path
@@ -48,15 +50,33 @@ def get_framefp_from_sounding_id(L1bfile, sounding_id):
 class wrapped_fp(object):
     """
     create a wrapped full_physics.L2Run object. Contains convenience 
-    methods to make this easier to run with retrieval.py
+    methods to make this easier to run with l2_afp_retrieval.py, or with
+    any other python code.
 
     In general, throughout the class code, when we extract data out of 
-    the full_physics.L2Run object, 
+    the full_physics.L2Run object.
+
+    Note, this will work for B8 or B10+ variations of the L2FP code.
+    For B10+, the co2_pr_file must be specified via keyword. For B8,
+    this keyword is ignored.
     """
 
-    def __init__(self, L1bfile, ECMWFfile, 
+    # for reference, the init method for L2Run has the inputs in this order:
+    #def __init__(self, lua_config, sounding_id, met_file, spectrum_file, 
+    #             print_log = True,
+    #             scene_file = None,
+    #             co2_pr_file = None,  # Only for B10 or later
+    #             abscodir = None,
+    #             merradir = None,
+    #             imap_file = None):
+
+    def __init__(self,
+                 L1bfile,
+                 Metfile, 
                  config_file, 
-                 merradir, abscodir,
+                 abscodir,
+                 merradir = None,
+                 co2_pr_file = None,
                  imap_file = None, 
                  sounding_id = None, 
                  frame_number = None, 
@@ -73,9 +93,12 @@ class wrapped_fp(object):
                 L1bfile, frame_number, footprint)
 
         arg_list = (config_file, sounding_id, 
-                    ECMWFfile, L1bfile, )
+                    Metfile, L1bfile, )
+        
         kw_dict = dict(merradir=merradir, abscodir=abscodir, 
                        imap_file=imap_file)
+        if co2_pr_file:
+            kw_dict['co2_pr_file'] = co2_pr_file
 
         # store the input args and kw - mostly as a debug tool later.
         self._arg_list = arg_list
@@ -84,6 +107,23 @@ class wrapped_fp(object):
 
         # Reference wavenumber for aerosol optical depths (755 nm)
         self._wn_ref = 1e7/755.0
+
+        # the python implementation of L2Run actually uses environment
+        # variables to send in most of the input variables into the C++
+        # code. Since the environment variables are preserved separated,
+        # this means that successive creations of an L2Run object can re-use
+        # input values from the previous run, since the env vars from the
+        # previous run might still be there. So, at this stage, we delete
+        # all the environment variables first to ensure this L2Run gets a
+        # clean copy.
+        # list of env vars can be found in full_physics/l2_run.py, L2Run
+        # class definition and __init__ method (lines 28-40)
+        key_list = ['met_file', 'spectrum_file', 'sounding_id', 
+                    'co2_pr_file', 'scene_file', 'imap_file',
+                    'abscodir', 'merradir']
+        for key in key_list:
+            if key in os.environ:
+                del os.environ[key]
 
         # create the full physics L2Run object. This is the main 
         # interface to the l2_fp application.
@@ -950,8 +990,8 @@ class wrapped_fp_aerosol_reff(wrapped_fp):
     def __init__(self,
                  base_aerosol_property_file,
                  aerosol_variable_defs,
-                 L1bfile, ECMWFfile, config_file, 
-                 merradir, abscodir,
+                 L1bfile, Metfile, config_file, 
+                 abscodir,
                  reff_prior_mean = 10.0, reff_prior_stdv = 4.0, 
                  reff_increment = 0.05, wrkdir = '.',  **kwarg):
         """
@@ -1015,7 +1055,7 @@ class wrapped_fp_aerosol_reff(wrapped_fp):
         # I think this needs to happen first?
         # _update_aerosol_props(reff_prior_mean)
 
-        arg = (L1bfile, ECMWFfile, lua_config_file, merradir, abscodir)
+        arg = (L1bfile, Metfile, lua_config_file, abscodir)
 
         super(wrapped_fp_aerosol_reff, self).__init__(*arg, **kwarg)
 
