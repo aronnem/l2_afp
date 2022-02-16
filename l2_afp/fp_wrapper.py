@@ -990,7 +990,7 @@ class wrapped_fp_aerosol_reff(wrapped_fp):
     def __init__(self,
                  base_aerosol_property_file,
                  aerosol_variable_defs,
-                 L1bfile, ECMWFfile, config_file, 
+                 L1bfile, Metfile, config_file, 
                  merradir, abscodir,
                  reff_prior_mean = 10.0, reff_prior_stdv = 4.0, 
                  reff_increment = 0.05, wrkdir = '.',  **kwarg):
@@ -1055,7 +1055,7 @@ class wrapped_fp_aerosol_reff(wrapped_fp):
         # I think this needs to happen first?
         # _update_aerosol_props(reff_prior_mean)
 
-        arg = (L1bfile, ECMWFfile, lua_config_file, merradir, abscodir)
+        arg = (L1bfile, Metfile, lua_config_file, merradir, abscodir)
 
         super(wrapped_fp_aerosol_reff, self).__init__(*arg, **kwarg)
 
