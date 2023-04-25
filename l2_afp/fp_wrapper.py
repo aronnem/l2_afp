@@ -616,6 +616,14 @@ class wrapped_fp(object):
         """
         return self.L2Run.state_vector.state.copy()
 
+    def pprint_state_vector(self):
+        """
+        pretty print the state vector (values and names) to console.
+        """
+        x = self.get_x()
+        svnames = self.get_state_variable_names()
+        for n, (x_i, name_i) in enumerate(zip(x, svnames)):
+            print('{:2d} {:12.6g} {:s}'.format(n, x_i, name_i))
 
     def get_Sa(self):
         """
