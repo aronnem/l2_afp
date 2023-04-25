@@ -92,7 +92,8 @@ def read_mie_mom_file(fileroot):
     for n in range(6):
         wlen, Pnn = _parse_mom_chunk(llist, ctr)
         if wlen != dat['wlen'][n]:
-            print(('Wavelen mismatch: {0:f} {1:f}'.format(wlen,dat['slen'][n])))
+            print(('Wavelen mismatch: {0:16.12f} {1:16.12f}'.format(
+                wlen,dat['wlen'][n])))
         dat['Pnn'][n] = Pnn
         ctr = ctr + 1 + Pnn.shape[0]
 
