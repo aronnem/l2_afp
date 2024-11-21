@@ -462,7 +462,7 @@ class wrapped_fp(object):
         the gas_name input is a string, one of "O2", "CO2", "H2O"
         """
         obj = self.L2Run.atmosphere.absorber.gas_column_thickness_layer(gas_name)
-        profile_dens = obj.value.value.copy()
+        profile_numdens = obj.value.value.copy()
         return profile_numdens
 
     def get_pressure_levels(self):
