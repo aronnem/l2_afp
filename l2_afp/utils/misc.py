@@ -110,6 +110,10 @@ def get_lua_config_files():
         _lua_config_dir, 'custom_config_default.lua')
     lua_configs['default_ABSCOv4.2'] = os.path.join(
         _lua_config_dir, 'custom_config_absco42.lua')
+    lua_configs['default_ABSCOv5.1'] = os.path.join(
+        _lua_config_dir, 'custom_config_absco51.lua')
+    lua_configs['default_ABSCOv5.2'] = os.path.join(
+        _lua_config_dir, 'custom_config_absco52.lua')
     lua_configs['fixed_aerosol'] = os.path.join(
         _lua_config_dir, 'custom_config_fixed_aerosol.lua')
     lua_configs['watercloud_reff'] = os.path.join(
